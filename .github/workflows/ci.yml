@@ -52,8 +52,11 @@ jobs:
       - name: Install dependencies (no scripts)
         run: npm install --ignore-scripts
 
+      - name: Build
+        run: npx tsc
+
       - name: npm audit
         run: npm audit --audit-level=high
 
-      - name: pmharden (config + secrets)
-        run: node node_modules/.bin/pmharden audit
+      - name: pmharden self-audit
+        run: node dist/cli.js audit
