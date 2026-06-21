@@ -1,205 +1,191 @@
 # pmharden
 
-Security hardening CLI for **npm, pnpm, yarn, and bun** package managers.
-
-Audits the *environment* your installs run in — not just individual packages.
+Audits the environment your npm/pnpm/yarn/bun installs run in — not just the packages.
 
 ```bash
 npx pmharden
 ```
 
----
-
-## Why this matters
-
-Most supply-chain attacks exploit **misconfigured package manager settings**, not just malicious packages.
-The three most common attack paths:
-
-**1. Postinstall script execution** — malicious packages run arbitrary code during `npm install`
-
-| Incident | Year | What happened |
-|----------|------|---------------|
-| [event-stream](https://github.com/dominictarr/event-stream/issues/116) | 2018 | Hijacked dependency ran postinstall to steal Bitcoin wallet data |
-| [eslint-scope](https://eslint.org/blog/2018/07/postmortem-for-malicious-packages-published-on-July-12th-2018-targeting-eslint-users/) | 2018 | Compromised credentials → malicious postinstall read `~/.npmrc` tokens → published more malicious packages |
-| [ua-parser-js](https://github.com/advisories/GHSA-pjwm-rvh2-c87w) | 2021 | Account hijack → preinstall dropped crypto miners + password stealers on millions of machines |
-| [coa](https://github.com/advisories/GHSA-73qr-pfmq-6rp8) | 2021 | Same wave — postinstall info-stealer in widely used CLI package |
-| [node-ipc](https://nvd.nist.gov/vuln/detail/CVE-2022-23812) | 2022 | Maintainer added postinstall payload that wiped files on Russian/Belarusian IPs (CVE-2022-23812) |
-| [Ledger Connect Kit](https://www.ledger.com/blog/a-letter-from-ledger-chairman-ceo-pascal-gauthier-regarding-ledger-connect-kit-exploit) | 2023 | Malicious version published; build scripts drained crypto wallets |
-
-**Fix:** `npm config set ignore-scripts=true` — what `pmharden audit` checks for.
+[![CI](https://github.com/nadimtuhin/pmharden/actions/workflows/ci.yml/badge.svg)](https://github.com/nadimtuhin/pmharden/actions/workflows/ci.yml)
+[![npm version](https://badge.fury.io/js/pmharden.svg)](https://www.npmjs.com/package/pmharden)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
 
-**2. Newly-published packages (zero-day window)** — malicious packages often get pulled within days
+## The problem
 
-| Incident | Year | What happened |
-|----------|------|---------------|
-| [crossenv + 36 typosquats](https://blog.npmjs.org/post/163723642530/crossenv-malware-on-the-npm-registry) | 2017 | 36 packages published and immediately malicious; users hit within hours |
-| [ua-parser-js](https://github.com/advisories/GHSA-pjwm-rvh2-c87w) | 2021 | Hijacked version pulled within hours; a 7-day hold catches this |
-| [IconBurst](https://www.reversinglabs.com/blog/iconburst-npm-software-supply-chain-attack-grabs-data-from-apps-and-websites) | 2022 | Typosquat packages (ionicio, ajax-libs, etc.) scraped form data from apps |
-| [LofyGang](https://www.reversinglabs.com/blog/lofygang-disrupting-open-source-ecosystem) | 2022 | 200+ newly-published packages exfiltrated Discord tokens |
+I ran this on my own machine and found a plaintext npm token in `~/.npmrc` — readable by any `postinstall` script on any package I'd ever installed.
 
-**Fix:** `minimum-release-age=7 days` in `~/.npmrc` — blocks packages published in the last 7 days.
-What `pmharden audit` checks for.
+That's the same attack that hit eslint-scope in 2018. A compromised maintainer account pushed a malicious version. The postinstall script read `~/.npmrc`, sent the auth token to an attacker server, then used it to publish more malicious packages. Self-propagating.
+
+The token had been sitting there for years. `npm audit` never flagged it. Socket.dev never flagged it. Neither tool looks at your config files.
 
 ---
 
-**3. Plaintext tokens in config files** — postinstall scripts actively hunt for them
+## What it does
 
-The eslint-scope attack (2018) is the canonical example: malicious postinstall read `~/.npmrc`,
-sent the auth token to an attacker server, then used it to publish more malicious packages.
-The attack chained *install-script execution + plaintext token* into a self-propagating supply-chain worm.
+Three checks, one command:
 
-GitGuardian's [State of Secrets Sprawl](https://www.gitguardian.com/state-of-secrets-sprawl) reports
-that npm tokens are among the most commonly leaked secrets found in public GitHub repos.
+```
+pmharden audit    — config linter (.npmrc, .pnpmrc, .yarnrc.yml, bunfig.toml)
+pmharden secrets  — plaintext tokens, file permissions
+pmharden global   — stale or risky globally installed packages
+pmharden          — all three
+```
 
-**Fix:** Replace `_authToken=abc123` with `_authToken=${NPM_TOKEN}` — what `pmharden secrets` checks for.
+Example output:
+
+```
+Config Audit
+
+✖  CRITICAL  [npm] ~/.npmrc (plaintext-npm-token)
+  Plaintext secret: //registry.npmjs.org/:_authToken=npm_***REDACTED***
+  Fix: Replace with ${NPM_TOKEN}
+
+✖  HIGH  [npm] ~/.npmrc (allow-git-all)
+  allow-git=all permits installs from unreviewed git commits.
+  Fix: npm config set allow-git=none
+
+✖  HIGH  [yarn] ~/.yarnrc (yarn-v1-no-script-control)
+  yarn v1 has no config-level script blocking. Every postinstall attack
+  applies with no mitigation path.
+  Fix: yarn set version berry
+
+─── Summary ────────────────────────────────
+ 1 critical   2 high  1 medium
+
+Action required: Fix critical/high issues before your next install.
+
+⚡ Fix all with one command:
+
+  claude -p 'You are fixing package manager security issues...'
+  opencode run '...'
+```
+
+When it finds issues, it generates a single prompt you can paste into Claude or OpenCode to fix everything in one shot.
 
 ---
 
-## What it checks
+## Why existing tools don't catch this
 
-| Command | What it audits |
-|---------|---------------|
-| `pmharden audit` | Config linter: `.npmrc`, `.pnpmrc`, `.yarnrc.yml`, `bunfig.toml` |
-| `pmharden secrets` | Plaintext tokens, overly-permissive file modes (644 vs 600) |
-| `pmharden global` | Globally installed packages: stale versions, known-risky tools |
-| `pmharden all` | All three (default) |
+| Tool | What it checks | What it misses |
+|------|---------------|----------------|
+| `npm audit` | CVEs in installed packages | Your config, your secrets, your globals |
+| [Socket.dev](https://socket.dev) | Per-package behavior analysis | Config files, ~/.npmrc tokens |
+| [npq](https://github.com/lirantal/npq) | Install-time interception | Existing misconfig risks |
+| [Snyk](https://snyk.io) | Dependency CVEs | PM environment audit |
+| **pmharden** | Config + secrets + globals | Per-package CVE database |
 
-### Config checks: npm
+Use it alongside `npm audit`, not instead of it.
+
+---
+
+## The attacks this prevents
+
+### postinstall execution
+
+Every package you install can run arbitrary code during `npm install` unless `ignore-scripts=true` is set.
+
+| Attack | Year | What happened |
+|--------|------|---------------|
+| [eslint-scope](https://eslint.org/blog/2018/07/postmortem-for-malicious-packages-published-on-July-12th-2018-targeting-eslint-users/) | 2018 | Malicious postinstall read `~/.npmrc` tokens, published more malicious packages |
+| [ua-parser-js](https://github.com/advisories/GHSA-pjwm-rvh2-c87w) | 2021 | Hijacked account, preinstall dropped crypto miners on millions of machines |
+| [node-ipc](https://nvd.nist.gov/vuln/detail/CVE-2022-23812) | 2022 | Maintainer added postinstall that wiped files on Russian/Belarusian IPs (CVE-2022-23812) |
+| [Ledger Connect Kit](https://www.ledger.com/blog/a-letter-from-ledger-chairman-ceo-pascal-gauthier-regarding-ledger-connect-kit-exploit) | 2023 | Malicious build scripts drained crypto wallets |
+
+`pmharden audit` checks that `ignore-scripts=true` is set.
+
+### zero-day window
+
+Malicious packages often get reported and pulled within days. If you install the day they're published, you're in the window.
+
+| Attack | Year | Notes |
+|--------|------|-------|
+| [crossenv + 36 typosquats](https://blog.npmjs.org/post/163723642530/crossenv-malware-on-the-npm-registry) | 2017 | 36 packages, all immediately malicious |
+| [IconBurst](https://www.reversinglabs.com/blog/iconburst-npm-software-supply-chain-attack-grabs-data-from-apps-and-websites) | 2022 | Typosquat packages scraped form data from live apps |
+| [LofyGang](https://www.reversinglabs.com/blog/lofygang-disrupting-open-source-ecosystem) | 2022 | 200+ packages, exfiltrated Discord tokens |
+
+`pmharden audit` checks that `minimum-release-age=7 days` is set — blocks packages published in the last 7 days.
+
+### plaintext tokens
+
+[GitGuardian's annual report](https://www.gitguardian.com/state-of-secrets-sprawl) consistently puts npm tokens among the top leaked secrets in public repos. Once a postinstall script has your publish token, it can push new versions of any package you own.
+
+`pmharden secrets` checks for plaintext tokens and overly-permissive file modes.
+
+---
+
+## Config checks
+
+### npm
 
 | Setting | Risk | Severity |
 |---------|------|----------|
-| `ignore-scripts` not `true` | Allows postinstall/preinstall execution | HIGH |
-| `allow-git=all` | Installs from unreviewed git commits — bypasses registry audit | HIGH |
-| No `minimum-release-age` | Packages published in last 7 days are a common zero-day vector | MEDIUM |
-| `unsafe-perm=true` | Runs scripts as root | HIGH |
+| `ignore-scripts` not `true` | Allows postinstall execution | HIGH |
+| `allow-git=all` | Installs from unreviewed git commits | HIGH |
+| No `minimum-release-age` | Zero-day window open | MEDIUM |
+| `unsafe-perm=true` | Scripts run as root | HIGH |
 | `audit=false` | Disables built-in CVE checks | MEDIUM |
 
-### Config checks: pnpm
+### pnpm
 
 | Setting | Risk | Severity |
 |---------|------|----------|
-| `strict-dep-builds` not set | Build scripts run silently without review | HIGH |
-| No `minimumReleaseAge` | Same 7-day zero-day window as npm | MEDIUM |
-| `blockExoticSubdeps` not set | Allows non-registry sub-dependencies | MEDIUM |
+| `strict-dep-builds` not set | Build scripts run without review | HIGH |
+| No `minimumReleaseAge` | Zero-day window open | MEDIUM |
+| `blockExoticSubdeps` not set | Non-registry sub-dependencies allowed | MEDIUM |
 
-### Config checks: yarn
+### yarn
 
 | Setting | Risk | Severity |
 |---------|------|----------|
 | yarn v1 (classic) | No config-level script blocking — architectural gap | HIGH |
 | `enableScripts: false` missing (v2+) | Allows postinstall execution | HIGH |
 
-yarn v1 has no equivalent of `ignore-scripts` that can be enforced via `.yarnrc`.
-See [yarnpkg/yarn#5335](https://github.com/yarnpkg/yarn/issues/5335).
-Every postinstall-based attack above hit yarn users with no mitigation path.
-
-### Secrets checks
-
-| Pattern | Risk | Severity |
-|---------|------|----------|
-| Plaintext `_authToken=` | Token theft via postinstall (eslint-scope attack) | CRITICAL |
-| `.npmrc` / `.yarnrc` permissions 644 | World-readable auth tokens | HIGH |
-| `NPM_TOKEN=` in config | Leaked env var pattern | CRITICAL |
-
-### Global package checks
-
-| Check | Risk |
-|-------|------|
-| Stale versions | Old globals (e.g. `npm` itself) miss security patches — see [netmask CVE-2021-28918](https://nvd.nist.gov/vuln/detail/CVE-2021-28918) |
-| `create-react-app` installed globally | Stale scaffold pulls hundreds of pinned-old vulnerable deps at project creation |
-| `node-gyp` / build tools | Native build tools in postinstall chains; version confusion attacks |
+yarn v1 has no `ignore-scripts` equivalent that works via `.yarnrc`. See [yarnpkg/yarn#5335](https://github.com/yarnpkg/yarn/issues/5335). Every attack in the table above hit yarn v1 users with no mitigation available.
 
 ---
 
 ## Install
 
 ```bash
-# Global (run anywhere)
-npm install -g pmharden
-
-# Or npx (no install)
-npx pmharden
+npm install -g pmharden   # global
+npx pmharden              # no install
 ```
 
-## Usage
-
-```bash
-# Run all checks (default)
-pmharden
-
-# Config files only
-pmharden audit
-
-# Token / secret exposure
-pmharden secrets
-
-# Global packages
-pmharden global
-```
-
-## Example output
-
-```
-Config Audit
-
-✖  CRITICAL  [npm] ~/.npmrc (plaintext-npm-token)
-  Plaintext secret found: //registry.npmjs.org/:_authToken=***REDACTED***
-  Fix: Replace with env var: //registry.npmjs.org/:_authToken=${NPM_TOKEN}
-
-✖  HIGH  [npm] ~/.npmrc (allow-git-all)
-  allow-git=all permits installing packages from unreviewed git commits. Supply-chain risk.
-  Fix: npm config set allow-git=none
-
-✖  HIGH  [yarn] ~/.yarnrc (yarn-v1-no-script-control)
-  yarn v1 has no config-level script blocking. All postinstall attacks apply with no mitigation.
-  Fix: yarn set version berry  OR  migrate to pnpm/bun
-
-⚠  MEDIUM  [npm] ~/.npmrc (no-minimum-release-age)
-  Packages published in the last 7 days are a common zero-day supply-chain vector.
-  Fix: Add to ~/.npmrc:  minimum-release-age=7 days
-```
-
-## CI integration
+## CI
 
 ```yaml
-# .github/workflows/security.yml
-- name: Harden package manager config
-  run: npx pmharden all
+- name: pmharden self-audit
+  run: node dist/cli.js audit   # or: npx pmharden@latest audit
 ```
 
-Exit code `1` on CRITICAL/HIGH findings — suitable for CI gates.
+Exit code `1` on CRITICAL/HIGH. Suitable for blocking merges.
 
-## The gap this fills
-
-| Tool | What it does | What it misses |
-|------|-------------|----------------|
-| `npm audit` | CVEs in installed packages | Config hardening, secrets, global packages |
-| [Socket.dev](https://socket.dev) | Per-install package analysis | Your environment config |
-| [npq](https://github.com/lirantal/npq) | Install-time interception | Existing config risks, secrets in files |
-| [Snyk](https://snyk.io) | Dependency CVEs | PM config audit, plaintext tokens |
-| **pmharden** | **Config + secrets + globals** | Per-package CVE database (use alongside npm audit) |
-
-`pmharden` is not a replacement for `npm audit` or Socket.dev — it's the missing layer that audits
-the *environment* all your installs happen in.
-
-## Further reading
-
-- [npm security best practices](https://cheatsheetseries.owasp.org/cheatsheets/NPM_Security_Cheat_Sheet.html) — OWASP
-- [Avoiding npm substitution attacks](https://medium.com/@alex.birsan/dependency-confusion-4a5d60fec610) — Alex Birsan (2021)
-- [The State of Open Source Security](https://snyk.io/reports/open-source-security/) — Snyk annual report
-- [pnpm security options](https://pnpm.io/npmrc#ignore-scripts) — pnpm docs
-- [npm provenance](https://docs.npmjs.com/generating-provenance-statements) — npm docs (build attestation)
+---
 
 ## Contributing
 
-PRs welcome. Key areas:
-- `binding.gyp` anomaly detection (pure-JS packages with native build files)
-- Token scope checking (publish vs read-only tokens)
-- pnpm `onlyBuiltDependencies` enforcement
-- Bun lockfile integrity checks
+Good first issues:
 
-## License
+- `binding.gyp` detection — pure-JS packages with native build files (typosquat signal)
+- Token scope checking — distinguish publish tokens from read-only tokens
+- pnpm `onlyBuiltDependencies` allowlist enforcement
+- Bun lockfile integrity checks
+- `--fix` flag — auto-apply safe remediations to config files
+
+See [AGENTS.md](AGENTS.md) for the full contribution guide including how to add a new check.
+
+---
+
+## Further reading
+
+- [OWASP npm Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/NPM_Security_Cheat_Sheet.html)
+- [Dependency Confusion](https://medium.com/@alex.birsan/dependency-confusion-4a5d60fec610) — Alex Birsan, 2021
+- [State of Secrets Sprawl](https://www.gitguardian.com/state-of-secrets-sprawl) — GitGuardian annual report
+- [pnpm security options](https://pnpm.io/npmrc#ignore-scripts)
+- [npm provenance](https://docs.npmjs.com/generating-provenance-statements)
+
+---
 
 MIT
