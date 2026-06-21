@@ -126,15 +126,14 @@ function auditNpmrc(path: string, findings: Finding[]): void {
 // ─── pnpm ──────────────────────────────────────────────────────────────────
 
 function auditPnpmrc(findings: Finding[]): void {
-  const paths = [
-    join(HOME, ".pnpmrc"),
-    join(HOME, ".npmrc"), // pnpm also reads .npmrc
-    "pnpm-workspace.yaml",
-    ".pnpmfile.cjs",
-  ];
+  // Prefer ~/.pnpmrc (pnpm-specific). Fall back to ~/.npmrc only if ~/.pnpmrc
+  // doesn't exist — pnpm also reads .npmrc but we avoid double-reporting.
+  const dedicated = join(HOME, ".pnpmrc");
+  const fallback = join(HOME, ".npmrc");
 
-  const found = paths.filter(fileExists);
-  if (found.length === 0) {
+  const path = fileExists(dedicated) ? dedicated : fileExists(fallback) ? fallback : null;
+
+  if (!path) {
     findings.push({
       severity: "info",
       tool: "pnpm",
@@ -146,48 +145,46 @@ function auditPnpmrc(findings: Finding[]): void {
     return;
   }
 
-  for (const path of found) {
-    const content = readFile(path);
-    if (!content) continue;
+  const content = readFile(path);
+  if (!content) return;
 
-    // strictDepBuilds / strict-dep-builds
-    if (!content.includes("strict-dep-builds") && !content.includes("strictDepBuilds")) {
-      findings.push({
-        severity: "high",
-        tool: "pnpm",
-        file: path,
-        rule: "no-strict-dep-builds",
-        message: `strict-dep-builds not set. pnpm will silently run dependency build scripts without review.`,
-        fix: `Add to ${path}:\nstrict-dep-builds=true`,
-        agentPrompt: `Open ${path} and add the line "strict-dep-builds=true" if it is not already present. Do not change any other lines.`,
-      });
-    }
+  // strictDepBuilds / strict-dep-builds
+  if (!content.includes("strict-dep-builds") && !content.includes("strictDepBuilds")) {
+    findings.push({
+      severity: "high",
+      tool: "pnpm",
+      file: path,
+      rule: "no-strict-dep-builds",
+      message: `strict-dep-builds not set. pnpm will silently run dependency build scripts without review.`,
+      fix: `Add to ${path}:\nstrict-dep-builds=true`,
+      agentPrompt: `Open ${path} and add the line "strict-dep-builds=true" if it is not already present. Do not change any other lines.`,
+    });
+  }
 
-    // minimumReleaseAge
-    if (!content.includes("minimum-release-age") && !content.includes("minimumReleaseAge")) {
-      findings.push({
-        severity: "medium",
-        tool: "pnpm",
-        file: path,
-        rule: "no-minimum-release-age",
-        message: `minimumReleaseAge not set. Fresh packages (<7 days) are a top supply-chain risk.`,
-        fix: `Add to ${path}:\nminimum-release-age=7`,
-        agentPrompt: `Open ${path} and add the line "minimum-release-age=7" if it is not already present. Do not change any other lines.`,
-      });
-    }
+  // minimumReleaseAge
+  if (!content.includes("minimum-release-age") && !content.includes("minimumReleaseAge")) {
+    findings.push({
+      severity: "medium",
+      tool: "pnpm",
+      file: path,
+      rule: "no-minimum-release-age",
+      message: `minimumReleaseAge not set. Fresh packages (<7 days) are a top supply-chain risk.`,
+      fix: `Add to ${path}:\nminimum-release-age=7`,
+      agentPrompt: `Open ${path} and add the line "minimum-release-age=7" if it is not already present. Do not change any other lines.`,
+    });
+  }
 
-    // blockExoticSubdeps
-    if (!content.includes("block-exotic-subdeps") && !content.includes("blockExoticSubdeps")) {
-      findings.push({
-        severity: "medium",
-        tool: "pnpm",
-        file: path,
-        rule: "no-block-exotic-subdeps",
-        message: `block-exotic-subdeps not set. Git and tarball transitive deps can bypass registry vetting.`,
-        fix: `Add to ${path}:\nblock-exotic-subdeps=true`,
-        agentPrompt: `Open ${path} and add the line "block-exotic-subdeps=true" if it is not already present. Do not change any other lines.`,
-      });
-    }
+  // blockExoticSubdeps
+  if (!content.includes("block-exotic-subdeps") && !content.includes("blockExoticSubdeps")) {
+    findings.push({
+      severity: "medium",
+      tool: "pnpm",
+      file: path,
+      rule: "no-block-exotic-subdeps",
+      message: `block-exotic-subdeps not set. Git and tarball transitive deps can bypass registry vetting.`,
+      fix: `Add to ${path}:\nblock-exotic-subdeps=true`,
+      agentPrompt: `Open ${path} and add the line "block-exotic-subdeps=true" if it is not already present. Do not change any other lines.`,
+    });
   }
 }
 
