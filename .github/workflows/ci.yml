@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies (no scripts)
+        run: npm install --ignore-scripts
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Test
+        run: bun test
+
+      - name: Build
+        run: npx tsc
+
+  audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: npm audit
+        run: npm audit --audit-level=high
+
+      - name: pmharden (config + secrets)
+        run: npx --yes pmharden audit
