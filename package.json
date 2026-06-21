@@ -12,7 +12,8 @@
     "dev": "bun run src/cli.ts",
     "test": "bun test",
     "lint": "tsc --noEmit",
-    "prepublishOnly": "bun run build"
+    "prepublishOnly": "bun run build",
+    "publish:npm": "read -p 'OTP: ' otp && npm publish --access public --ignore-scripts --otp=$otp"
   },
   "keywords": [
     "npm",
