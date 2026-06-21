@@ -39,6 +39,7 @@ function auditNpmrc(path: string, findings: Finding[]): void {
       rule: "ignore-scripts-disabled",
       message: `ignore-scripts is not set to true. Postinstall/preinstall scripts can execute arbitrary code on npm install.`,
       fix: `npm config set ignore-scripts true   (or add ignore-scripts=true to ${path})`,
+      agentPrompt: `Open ${path} and add the line "ignore-scripts=true" if it is missing. Do not remove any existing lines. Run: npm config set ignore-scripts true`,
     });
   }
 
@@ -51,6 +52,7 @@ function auditNpmrc(path: string, findings: Finding[]): void {
       rule: "audit-disabled",
       message: `audit=false disables vulnerability scanning on every install.`,
       fix: `Remove audit=false from ${path}`,
+      agentPrompt: `Open ${path} and remove the line "audit=false". Do not change any other lines.`,
     });
   }
 
@@ -64,6 +66,7 @@ function auditNpmrc(path: string, findings: Finding[]): void {
       rule: "allow-git-all",
       message: `allow-git=all permits installing packages directly from git (including unreviewed commits). Supply-chain risk.`,
       fix: `npm config set allow-git=none  (or restrict to specific organizations)`,
+      agentPrompt: `Open ${path} and set "allow-git=none". If the line does not exist, add it. If it says "allow-git=all", change it to "allow-git=none". Do not change any other lines.`,
     });
   }
 
@@ -76,6 +79,7 @@ function auditNpmrc(path: string, findings: Finding[]): void {
       rule: "no-minimum-release-age",
       message: `No minimum-release-age set. Packages published in the last 7 days are a common zero-day supply-chain vector.`,
       fix: `Add minimum-release-age=7 days to ${path}`,
+      agentPrompt: `Open ${path} and add the line "minimum-release-age=7 days" if it is not already present. Do not change any other lines.`,
     });
   }
 
@@ -88,6 +92,7 @@ function auditNpmrc(path: string, findings: Finding[]): void {
       rule: "unsafe-perm",
       message: `unsafe-perm=true runs install scripts with elevated privileges. Removes sandboxing.`,
       fix: `Remove unsafe-perm=true from ${path}`,
+      agentPrompt: `Open ${path} and remove the line "unsafe-perm=true". Do not change any other lines.`,
     });
   }
 
@@ -99,6 +104,7 @@ function auditNpmrc(path: string, findings: Finding[]): void {
       file,
       rule: "custom-registry",
       message: `Custom registry: ${cfg["registry"]}. Ensure this is intentional and trusted.`,
+      agentPrompt: `Review ${path}. The registry is set to "${cfg["registry"]}" instead of "https://registry.npmjs.org/". If this is intentional (e.g. a private registry), add a comment explaining why. If it is a mistake, change it to "registry=https://registry.npmjs.org/".`,
     });
   }
 
@@ -112,6 +118,7 @@ function auditNpmrc(path: string, findings: Finding[]): void {
       rule: "npmrc-permissions",
       message: `${path} is group/world readable (mode ${mode.toString(8)}). May expose auth tokens.`,
       fix: `chmod 600 ${path}`,
+      agentPrompt: `Run: chmod 600 ${path}`,
     });
   }
 }
@@ -128,13 +135,13 @@ function auditPnpmrc(findings: Finding[]): void {
 
   const found = paths.filter(fileExists);
   if (found.length === 0) {
-    // Check if pnpm is installed but unconfigured
     findings.push({
       severity: "info",
       tool: "pnpm",
       rule: "no-pnpmrc",
       message: `No pnpm config found. Consider setting strictDepBuilds=true and minimumReleaseAge.`,
       fix: `Create ~/.pnpmrc with:\nstrict-dep-builds=true\nminimum-release-age=7`,
+      agentPrompt: `Create the file ~/.pnpmrc with these contents:\nstrict-dep-builds=true\nminimum-release-age=7\nblock-exotic-subdeps=true`,
     });
     return;
   }
@@ -152,6 +159,7 @@ function auditPnpmrc(findings: Finding[]): void {
         rule: "no-strict-dep-builds",
         message: `strict-dep-builds not set. pnpm will silently run dependency build scripts without review.`,
         fix: `Add to ${path}:\nstrict-dep-builds=true`,
+        agentPrompt: `Open ${path} and add the line "strict-dep-builds=true" if it is not already present. Do not change any other lines.`,
       });
     }
 
@@ -164,6 +172,7 @@ function auditPnpmrc(findings: Finding[]): void {
         rule: "no-minimum-release-age",
         message: `minimumReleaseAge not set. Fresh packages (<7 days) are a top supply-chain risk.`,
         fix: `Add to ${path}:\nminimum-release-age=7`,
+        agentPrompt: `Open ${path} and add the line "minimum-release-age=7" if it is not already present. Do not change any other lines.`,
       });
     }
 
@@ -176,6 +185,7 @@ function auditPnpmrc(findings: Finding[]): void {
         rule: "no-block-exotic-subdeps",
         message: `block-exotic-subdeps not set. Git and tarball transitive deps can bypass registry vetting.`,
         fix: `Add to ${path}:\nblock-exotic-subdeps=true`,
+        agentPrompt: `Open ${path} and add the line "block-exotic-subdeps=true" if it is not already present. Do not change any other lines.`,
       });
     }
   }
@@ -197,6 +207,7 @@ function auditYarnrc(findings: Finding[]): void {
         rule: "enable-scripts-missing",
         message: `enableScripts: false not set in .yarnrc.yml. Yarn Berry runs lifecycle scripts by default.`,
         fix: `Add to ${v2path}:\nenableScripts: false`,
+        agentPrompt: `Open ${v2path} and add the line "enableScripts: false" at the top level if it is not already present. This is a YAML file — preserve indentation of existing lines. Do not change any other lines.`,
       });
     }
     if (!content.includes("minimumReleaseAge")) {
@@ -207,10 +218,10 @@ function auditYarnrc(findings: Finding[]): void {
         rule: "no-minimum-release-age",
         message: `minimumReleaseAge not set in .yarnrc.yml.`,
         fix: `Add to ${v2path}:\nminimumReleaseAge: "7 days"`,
+        agentPrompt: `Open ${v2path} and add the line 'minimumReleaseAge: "7 days"' at the top level if it is not already present. This is a YAML file — preserve indentation. Do not change any other lines.`,
       });
     }
   } else if (fileExists(v1path)) {
-    // yarn v1 classic — enableScripts not supported but worth flagging
     findings.push({
       severity: "high",
       tool: "yarn",
@@ -218,6 +229,7 @@ function auditYarnrc(findings: Finding[]): void {
       rule: "yarn-v1-no-script-control",
       message: `yarn v1 classic has no built-in script blocking. Consider upgrading to yarn berry or using npm config set ignore-scripts=true.`,
       fix: `yarn set version berry  OR  migrate to pnpm/bun`,
+      agentPrompt: `yarn v1 has no config-level way to block postinstall scripts. Two options:\n1. Run "yarn set version berry" to upgrade to Yarn Berry, then add "enableScripts: false" to .yarnrc.yml\n2. Migrate the project to pnpm: run "npx pnpm import" to convert the lockfile, then replace "yarn" with "pnpm" in package.json scripts\nAsk the user which approach they prefer before proceeding.`,
     });
   }
 }
@@ -227,13 +239,13 @@ function auditYarnrc(findings: Finding[]): void {
 function auditBunfig(findings: Finding[]): void {
   const path = join(HOME, ".bunfig.toml");
   if (!fileExists(path)) {
-    // Bun blocks scripts by default — just note it's good but config could be explicit
     findings.push({
       severity: "info",
       tool: "bun",
       rule: "no-bunfig",
       message: `No ~/.bunfig.toml found. Bun blocks scripts by default (good), but consider adding an explicit registry setting.`,
       fix: `Create ~/.bunfig.toml:\n[install]\nregistry = "https://registry.npmjs.org/"`,
+      agentPrompt: `Create the file ~/.bunfig.toml with these contents:\n[install]\nregistry = "https://registry.npmjs.org/"`,
     });
     return;
   }
@@ -247,6 +259,7 @@ function auditBunfig(findings: Finding[]): void {
       rule: "no-registry-pinned",
       message: `No registry pinned in bunfig.toml. Add explicit registry to prevent accidental scoped package resolution to untrusted sources.`,
       fix: `Add to ${path}:\n[install]\nregistry = "https://registry.npmjs.org/"`,
+      agentPrompt: `Open ${path} and add the following under an [install] section:\nregistry = "https://registry.npmjs.org/"\nIf [install] already exists, add the line inside it. This is a TOML file — preserve existing structure.`,
     });
   }
 }
@@ -272,6 +285,7 @@ export function runConfigAudit(): CheckResult {
       rule: "no-npmrc",
       message: `No .npmrc found. npm runs with insecure defaults (scripts enabled, no release age gate).`,
       fix: `Create ~/.npmrc with:\nignore-scripts=true\nminimum-release-age=7 days\naudit=true`,
+      agentPrompt: `Create the file ~/.npmrc with these contents:\nignore-scripts=true\nminimum-release-age=7 days\naudit=true\nallow-git=none`,
     });
   }
 

@@ -25,7 +25,6 @@ export function renderFindings(findings: Finding[], title: string): void {
     return;
   }
 
-  // Sort by severity
   const sorted = [...findings].sort(
     (a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity)
   );
@@ -43,9 +42,18 @@ export function renderFindings(findings: Finding[], title: string): void {
 
     console.log(`${icon} ${badge} ${tool}${file} ${rule}`);
     console.log(`  ${f.message}`);
+
     if (f.fix) {
       console.log(chalk.dim(`  Fix: ${f.fix.split("\n").join("\n       ")}`));
     }
+
+    if (f.agentPrompt) {
+      const prompt = f.agentPrompt.replace(/'/g, '"');
+      console.log(chalk.blue(`  ⚡ Auto-fix:`));
+      console.log(chalk.blue(`     claude -p '${prompt}'`));
+      console.log(chalk.blue(`     opencode run '${prompt}'`));
+    }
+
     console.log("");
   }
 }
@@ -68,6 +76,8 @@ export function renderSummary(allFindings: Finding[]): boolean {
   );
 
   const hasSevere = counts.critical > 0 || counts.high > 0;
+  const withPrompts = allFindings.filter((f) => f.agentPrompt);
+
   if (hasSevere) {
     console.log(chalk.red("\nAction required: Fix critical/high issues before your next install."));
   } else if (counts.medium > 0) {
@@ -76,5 +86,16 @@ export function renderSummary(allFindings: Finding[]): boolean {
     console.log(chalk.green("\nLooking good. Keep your package managers updated."));
   }
 
-  return hasSevere; // exit code signal
+  if (withPrompts.length > 0) {
+    console.log(
+      chalk.blue(
+        `\n⚡ ${withPrompts.length} finding${withPrompts.length > 1 ? "s" : ""} above have AI auto-fix prompts.`
+      )
+    );
+    console.log(
+      chalk.dim(`   Paste the claude -p '...' or opencode run '...' line for each one.`)
+    );
+  }
+
+  return hasSevere;
 }

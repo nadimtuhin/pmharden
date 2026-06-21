@@ -32,6 +32,7 @@ function scanFileForSecrets(path: string, findings: Finding[], tool: string): vo
         rule: `plaintext-${pattern.name}`,
         message: `Plaintext secret found: ${redacted}`,
         fix: `Replace with env var reference, e.g. //registry.npmjs.org/:_authToken=\${NPM_TOKEN}`,
+        agentPrompt: `Open ${path} and replace any line matching //:_authToken=<plaintext> with //:_authToken=\${NPM_TOKEN}. Do not delete the line — only replace the literal token with the env var reference. Do not change any other lines. Then remind the user to: (1) set NPM_TOKEN in their shell profile, (2) rotate the exposed token at https://www.npmjs.com/settings/<username>/tokens`,
       });
     }
   }
@@ -48,6 +49,7 @@ function checkFilePermissions(path: string, findings: Finding[], tool: string): 
       rule: "config-file-permissions",
       message: `${path} permissions are too open (${mode.toString(8)}). Group/world can read credentials.`,
       fix: `chmod 600 ${path}`,
+      agentPrompt: `Run: chmod 600 ${path}`,
     });
   }
 }
@@ -64,6 +66,7 @@ function checkGitTracked(path: string, findings: Finding[], tool: string): void 
       rule: "config-committed-to-git",
       message: `${path} is tracked by git! Any auth tokens in it are exposed in git history.`,
       fix: `git rm --cached ${path}\necho "${path}" >> .gitignore\n# Also rotate any tokens that were ever in this file`,
+      agentPrompt: `Run these commands in order:\n1. git rm --cached ${path}\n2. echo "${path}" >> .gitignore\n3. git commit -m "security: untrack ${path} from git history"\nThen warn the user: any token that was ever committed in this file must be rotated immediately at https://www.npmjs.com/settings/<username>/tokens — git history retains the old value even after removal.`,
     });
   } catch {
     // not tracked — good
@@ -86,6 +89,7 @@ function checkEnvVarUsage(path: string, findings: Finding[], tool: string): void
       rule: "empty-token-line",
       message: `Empty _authToken line found. Token may have been deleted but the registry line remains.`,
       fix: `Remove the empty //registry:_authToken= line from ${path}`,
+      agentPrompt: `Open ${path} and remove any line that matches the pattern "//registry:_authToken=" with nothing after the equals sign. Do not change any other lines.`,
     });
   }
 }
