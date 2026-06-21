@@ -117,7 +117,9 @@ function checkInstallScripts(name: string, version: string): boolean {
   }
 }
 
-export function runGlobalAudit(): CheckResult {
+export function runGlobalAudit(
+  onProgress?: (name: string, current: number, total: number) => void
+): CheckResult {
   const findings: Finding[] = [];
 
   const allGlobals: GlobalPackage[] = [
@@ -138,7 +140,9 @@ export function runGlobalAudit(): CheckResult {
     return { findings, skipped: "No global packages found" };
   }
 
-  for (const pkg of deduped) {
+  for (let i = 0; i < deduped.length; i++) {
+    const pkg = deduped[i]!;
+    onProgress?.(pkg.name, i + 1, deduped.length);
     // 1. Known risky globals
     if (KNOWN_RISKY_GLOBALS[pkg.name]) {
       const risk = KNOWN_RISKY_GLOBALS[pkg.name]!;
