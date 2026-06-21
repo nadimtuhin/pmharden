@@ -70,19 +70,6 @@ function auditNpmrc(path: string, findings: Finding[]): void {
     });
   }
 
-  // 4. No minimum-release-age (freshly published packages are high risk)
-  if (!cfg["minimum-release-age"] && !cfg["min-release-age"]) {
-    findings.push({
-      severity: "medium",
-      tool,
-      file,
-      rule: "no-minimum-release-age",
-      message: `No minimum-release-age set. Packages published in the last 7 days are a common zero-day supply-chain vector.`,
-      fix: `Add minimum-release-age=7 days to ${path}`,
-      agentPrompt: `Open ${path} and add the line "minimum-release-age=7 days" if it is not already present. Do not change any other lines.`,
-    });
-  }
-
   // 5. unsafe-perm
   if (cfg["unsafe-perm"] === "true") {
     findings.push({

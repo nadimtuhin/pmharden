@@ -56,15 +56,23 @@ function checkFilePermissions(path: string, findings: Finding[], tool: string): 
 
 function checkGitTracked(path: string, findings: Finding[], tool: string): void {
   if (!fileExists(path)) return;
+  // Only flag if the file is git-tracked AND contains secrets.
+  // A committed .npmrc with only policy settings (ignore-scripts etc.) is intentional.
+  const content = readFile(path);
+  if (!content) return;
+  const hasSecret = SECRET_PATTERNS.some((p) => {
+    p.regex.lastIndex = 0;
+    return p.regex.test(content);
+  });
+  if (!hasSecret) return;
   try {
-    // Check if file is tracked in git
     execSync(`git ls-files --error-unmatch "${path}" 2>/dev/null`, { stdio: "pipe" });
     findings.push({
       severity: "critical",
       tool,
       file: path,
       rule: "config-committed-to-git",
-      message: `${path} is tracked by git! Any auth tokens in it are exposed in git history.`,
+      message: `${path} is tracked by git and contains secrets! Tokens are exposed in git history.`,
       fix: `git rm --cached ${path}\necho "${path}" >> .gitignore\n# Also rotate any tokens that were ever in this file`,
       agentPrompt: `Run these commands in order:\n1. git rm --cached ${path}\n2. echo "${path}" >> .gitignore\n3. git commit -m "security: untrack ${path} from git history"\nThen warn the user: any token that was ever committed in this file must be rotated immediately at https://www.npmjs.com/settings/<username>/tokens — git history retains the old value even after removal.`,
     });
