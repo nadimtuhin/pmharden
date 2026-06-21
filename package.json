@@ -1,6 +1,6 @@
 {
   "name": "pmharden",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Security hardening CLI for npm, pnpm, yarn, and bun — config linter, global package auditor, and .npmrc secret scanner",
   "type": "module",
   "main": "./dist/index.js",

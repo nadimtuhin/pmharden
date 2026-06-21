@@ -42,20 +42,44 @@ export function renderFindings(findings: Finding[], title: string): void {
 
     console.log(`${icon} ${badge} ${tool}${file} ${rule}`);
     console.log(`  ${f.message}`);
-
     if (f.fix) {
       console.log(chalk.dim(`  Fix: ${f.fix.split("\n").join("\n       ")}`));
     }
-
-    if (f.agentPrompt) {
-      const prompt = f.agentPrompt.replace(/'/g, '"');
-      console.log(chalk.blue(`  ⚡ Auto-fix:`));
-      console.log(chalk.blue(`     claude -p '${prompt}'`));
-      console.log(chalk.blue(`     opencode run '${prompt}'`));
-    }
-
     console.log("");
   }
+}
+
+function buildConsolidatedPrompt(findings: Finding[]): string {
+  const withPrompts = findings.filter((f) => f.agentPrompt);
+  if (withPrompts.length === 0) return "";
+
+  // Dedupe: same rule on same file from different tools (e.g. npm+pnpm both flag .npmrc)
+  const seen = new Set<string>();
+  const unique = withPrompts.filter((f) => {
+    const key = `${f.rule}::${f.file ?? ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  // Order: critical → high → medium → low → info
+  const ordered = unique.sort(
+    (a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity)
+  );
+
+  const steps = ordered
+    .map((f, i) => {
+      const label = `[${f.severity.toUpperCase()}] ${f.rule}${f.file ? ` in ${f.file}` : ""}`;
+      return `${i + 1}. ${label}\n   ${f.agentPrompt}`;
+    })
+    .join("\n\n");
+
+  return (
+    `You are fixing package manager security issues found by pmharden. ` +
+    `Apply ALL of the following fixes in order. After each fix, verify the change is correct before proceeding. ` +
+    `Do not make any changes beyond what is listed. Do not install packages.\n\n` +
+    steps
+  );
 }
 
 export function renderSummary(allFindings: Finding[]): boolean {
@@ -76,7 +100,6 @@ export function renderSummary(allFindings: Finding[]): boolean {
   );
 
   const hasSevere = counts.critical > 0 || counts.high > 0;
-  const withPrompts = allFindings.filter((f) => f.agentPrompt);
 
   if (hasSevere) {
     console.log(chalk.red("\nAction required: Fix critical/high issues before your next install."));
@@ -86,15 +109,13 @@ export function renderSummary(allFindings: Finding[]): boolean {
     console.log(chalk.green("\nLooking good. Keep your package managers updated."));
   }
 
-  if (withPrompts.length > 0) {
-    console.log(
-      chalk.blue(
-        `\n⚡ ${withPrompts.length} finding${withPrompts.length > 1 ? "s" : ""} above have AI auto-fix prompts.`
-      )
-    );
-    console.log(
-      chalk.dim(`   Paste the claude -p '...' or opencode run '...' line for each one.`)
-    );
+  const prompt = buildConsolidatedPrompt(allFindings);
+  if (prompt) {
+    const escaped = prompt.replace(/'/g, '"');
+    console.log(chalk.blue("\n⚡ Fix all with one command:"));
+    console.log(chalk.blue(`\n  claude -p '${escaped}'`));
+    console.log(chalk.dim(`\n  # or:`));
+    console.log(chalk.blue(`  opencode run '${escaped}'`));
   }
 
   return hasSevere;
