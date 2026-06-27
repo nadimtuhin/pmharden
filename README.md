@@ -93,6 +93,8 @@ Every package you install can run arbitrary code during `npm install` unless `ig
 | [ua-parser-js](https://github.com/advisories/GHSA-pjwm-rvh2-c87w) | 2021 | Hijacked account, preinstall dropped crypto miners on millions of machines |
 | [node-ipc](https://nvd.nist.gov/vuln/detail/CVE-2022-23812) | 2022 | Maintainer added postinstall that wiped files on Russian/Belarusian IPs (CVE-2022-23812) |
 | [Ledger Connect Kit](https://www.ledger.com/blog/a-letter-from-ledger-chairman-ceo-pascal-gauthier-regarding-ledger-connect-kit-exploit) | 2023 | Malicious build scripts drained crypto wallets |
+| [Mastra — 140+ packages](https://socket.dev/blog/mastra-npm-packages-compromised) | 2026 | Typosquatted dependency `easy-day-js` injected into 140+ `@mastra/*` packages via a hijacked npm account. Postinstall fetched a second-stage cross-platform infostealer that stole browser history, 160+ crypto wallet extensions, and CI secrets. `@mastra/core` alone has 918K weekly downloads. |
+| [Mini Shai-Hulud / Miasma / Hades](https://socket.dev/supply-chain-attacks/miasma-mini-shai-hulud-supply-chain-attack) | 2026 | Ongoing worm campaign: 471+ artifacts across npm and PyPI. Payloads staged through Bun, targeting GitHub/npm/PyPI tokens, SSH keys, `.env` files, cloud credentials, and Kubernetes service accounts. Expanded to Go ecosystem and GitHub Actions. Latest wave hit `@immobiliarelabs` Backstage plugins (GitLab + LDAP auth) on June 26, 2026. |
 
 `pmharden audit` checks that `ignore-scripts=true` is set.
 
@@ -105,6 +107,7 @@ Malicious packages often get reported and pulled within days. If you install the
 | [crossenv + 36 typosquats](https://blog.npmjs.org/post/163723642530/crossenv-malware-on-the-npm-registry) | 2017 | 36 packages, all immediately malicious |
 | [IconBurst](https://www.reversinglabs.com/blog/iconburst-npm-software-supply-chain-attack-grabs-data-from-apps-and-websites) | 2022 | Typosquat packages scraped form data from live apps |
 | [LofyGang](https://www.reversinglabs.com/blog/lofygang-disrupting-open-source-ecosystem) | 2022 | 200+ packages, exfiltrated Discord tokens |
+| [Mastra `easy-day-js`](https://socket.dev/blog/mastra-npm-packages-compromised) | 2026 | Typosquat published clean, then updated the next day to deliver malware — same pattern as the axios campaign. Socket flagged it 6 minutes after publication. |
 
 `pmharden audit` checks that `minimum-release-age=7 days` is set — blocks packages published in the last 7 days.
 
@@ -113,6 +116,16 @@ Malicious packages often get reported and pulled within days. If you install the
 [GitGuardian's annual report](https://www.gitguardian.com/state-of-secrets-sprawl) consistently puts npm tokens among the top leaked secrets in public repos. Once a postinstall script has your publish token, it can push new versions of any package you own.
 
 `pmharden secrets` checks for plaintext tokens and overly-permissive file modes.
+
+---
+
+## AI scanner evasion (2026)
+
+Attackers are now actively targeting AI-based malware scanners, not just human reviewers.
+
+The Mini Shai-Hulud / Miasma campaign began [prepending fake prompt-injection headers](https://socket.dev/blog/npm-package-uses-prompt-injection-and-token-flooding-to-disrupt-ai-malware-scanners) to obfuscated payloads — comments designed to trigger AI safety filters, flood token context windows, or convince LLM-based scanners to misclassify the file before reaching the actual malicious code. One package (`shai_hulululud@1.0.48596`) shipped a 9MB `index.js` consisting almost entirely of safety-triggering Japanese-language bioweapon content in block comments, with the actual obfuscated stealer appended at the end.
+
+This does not affect `pmharden`. Static config auditing and token scanning read structured files (`.npmrc`, `.pnpmrc`, etc.), not arbitrary JavaScript. But it is a signal that AI-assisted review tooling in your pipeline needs adversarial testing.
 
 ---
 
@@ -185,6 +198,9 @@ See [SECURITY.md](SECURITY.md) for how to report vulnerabilities privately.
 - [State of Secrets Sprawl](https://www.gitguardian.com/state-of-secrets-sprawl) — GitGuardian annual report
 - [pnpm security options](https://pnpm.io/npmrc#ignore-scripts)
 - [npm provenance](https://docs.npmjs.com/generating-provenance-statements)
+- [Mastra npm supply chain attack (2026)](https://socket.dev/blog/mastra-npm-packages-compromised) — Socket Research
+- [Mini Shai-Hulud / Miasma / Hades campaign tracker](https://socket.dev/supply-chain-attacks/miasma-mini-shai-hulud-supply-chain-attack) — 471+ artifacts, ongoing
+- [AI scanner evasion via prompt injection in npm packages (2026)](https://socket.dev/blog/npm-package-uses-prompt-injection-and-token-flooding-to-disrupt-ai-malware-scanners) — Socket Research
 
 ---
 
