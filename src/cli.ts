@@ -3,7 +3,8 @@ import { Command } from "commander";
 import { runConfigAudit } from "./checks/config-audit.js";
 import { runSecretsCheck } from "./checks/secrets.js";
 import { runGlobalAudit } from "./checks/global-audit.js";
-import { renderFindings, renderSummary } from "./reporter.js";
+import { runPublishCheck } from "./checks/publish-check.js";
+import { renderFindings, renderSummary, renderJson } from "./reporter.js";
 import { Spinner } from "./utils/spinner.js";
 import type { Finding } from "./utils/types.js";
 
@@ -17,10 +18,15 @@ program
 program
   .command("audit")
   .description("Audit package manager config files against security baseline")
-  .action(() => {
-    const spin = new Spinner("Auditing config files…").start();
+  .option("--json", "Output findings as JSON")
+  .action(({ json }) => {
+    const spin = json ? null : new Spinner("Auditing config files…").start();
     const result = runConfigAudit();
-    spin.succeed("Config audit done");
+    if (json) {
+      renderJson(result.findings);
+      process.exit(result.findings.some((f) => f.severity === "critical" || f.severity === "high") ? 1 : 0);
+    }
+    spin!.succeed("Config audit done");
     renderFindings(result.findings, "Config Audit");
     const severe = renderSummary(result.findings);
     process.exit(severe ? 1 : 0);
@@ -29,10 +35,15 @@ program
 program
   .command("secrets")
   .description("Scan config files for plaintext tokens, bad permissions, git exposure")
-  .action(() => {
-    const spin = new Spinner("Scanning for secrets…").start();
+  .option("--json", "Output findings as JSON")
+  .action(({ json }) => {
+    const spin = json ? null : new Spinner("Scanning for secrets…").start();
     const result = runSecretsCheck();
-    spin.succeed("Secrets scan done");
+    if (json) {
+      renderJson(result.findings);
+      process.exit(result.findings.some((f) => f.severity === "critical" || f.severity === "high") ? 1 : 0);
+    }
+    spin!.succeed("Secrets scan done");
     renderFindings(result.findings, "Secrets Scan");
     const severe = renderSummary(result.findings);
     process.exit(severe ? 1 : 0);
@@ -41,16 +52,21 @@ program
 program
   .command("global")
   .description("Audit globally installed packages for CVEs, stale versions, install-script risks")
-  .action(() => {
-    const spin = new Spinner("Fetching global package list…").start();
-    const result = runGlobalAudit((name, current, total) => {
-      spin.update(`Checking ${name} (${current}/${total})…`);
+  .option("--json", "Output findings as JSON")
+  .action(({ json }) => {
+    const spin = json ? null : new Spinner("Fetching global package list…").start();
+    const result = runGlobalAudit(json ? undefined : (name, current, total) => {
+      spin!.update(`Checking ${name} (${current}/${total})…`);
     });
+    if (json) {
+      renderJson(result.findings ?? []);
+      process.exit((result.findings ?? []).some((f) => f.severity === "critical" || f.severity === "high") ? 1 : 0);
+    }
     if (result.skipped) {
-      spin.succeed(result.skipped);
+      spin!.succeed(result.skipped);
       process.exit(0);
     }
-    spin.succeed(`Global audit done`);
+    spin!.succeed(`Global audit done`);
     renderFindings(result.findings, "Global Package Audit");
     const severe = renderSummary(result.findings);
     process.exit(severe ? 1 : 0);
@@ -58,49 +74,61 @@ program
 
 program
   .command("all")
-  .description("Run all checks: config audit + secrets scan + global audit")
-  .action(() => {
+  .description("Run all checks: config audit + secrets scan + global audit + publish check")
+  .option("--json", "Output findings as JSON")
+  .action(({ json }) => {
     const allFindings: Finding[] = [];
-    console.log("");
+
+    if (!json) console.log("");
 
     // 1. Config audit
-    const configSpin = new Spinner("Auditing config files…").start();
+    const configSpin = json ? null : new Spinner("Auditing config files…").start();
     const configResult = runConfigAudit();
-    if (configResult.findings.length === 0) {
-      configSpin.succeed("Config files look good");
-    } else {
-      configSpin.fail(`Config audit: ${configResult.findings.length} issue(s) found`);
+    if (!json) {
+      if (configResult.findings.length === 0) configSpin!.succeed("Config files look good");
+      else configSpin!.fail(`Config audit: ${configResult.findings.length} issue(s) found`);
+      renderFindings(configResult.findings, "Config Audit");
     }
-    renderFindings(configResult.findings, "Config Audit");
     allFindings.push(...configResult.findings);
 
     // 2. Secrets scan
-    const secretsSpin = new Spinner("Scanning for secrets…").start();
+    const secretsSpin = json ? null : new Spinner("Scanning for secrets…").start();
     const secretsResult = runSecretsCheck();
-    if (secretsResult.findings.length === 0) {
-      secretsSpin.succeed("No secrets found");
-    } else {
-      secretsSpin.fail(`Secrets: ${secretsResult.findings.length} issue(s) found`);
+    if (!json) {
+      if (secretsResult.findings.length === 0) secretsSpin!.succeed("No secrets found");
+      else secretsSpin!.fail(`Secrets: ${secretsResult.findings.length} issue(s) found`);
+      renderFindings(secretsResult.findings, "Secrets Scan");
     }
-    renderFindings(secretsResult.findings, "Secrets Scan");
     allFindings.push(...secretsResult.findings);
 
-    // 3. Global audit with per-package progress
-    const globalSpin = new Spinner("Fetching global package list…").start();
-    const globalResult = runGlobalAudit((name, current, total) => {
-      globalSpin.update(`Checking ${name} (${current}/${total})…`);
+    // 3. Global audit
+    const globalSpin = json ? null : new Spinner("Fetching global package list…").start();
+    const globalResult = runGlobalAudit(json ? undefined : (name, current, total) => {
+      globalSpin!.update(`Checking ${name} (${current}/${total})…`);
     });
-    if (globalResult.skipped) {
-      globalSpin.succeed(globalResult.skipped);
-    } else if (globalResult.findings.length === 0) {
-      globalSpin.succeed("Global packages look good");
-    } else {
-      globalSpin.fail(`Global audit: ${globalResult.findings.length} issue(s) found`);
+    if (!json) {
+      if (globalResult.skipped) globalSpin!.succeed(globalResult.skipped);
+      else if (globalResult.findings.length === 0) globalSpin!.succeed("Global packages look good");
+      else globalSpin!.fail(`Global audit: ${globalResult.findings.length} issue(s) found`);
+      renderFindings(globalResult.findings ?? [], "Global Package Audit");
     }
-    renderFindings(globalResult.findings ?? [], "Global Package Audit");
     allFindings.push(...(globalResult.findings ?? []));
 
-    renderSummary(allFindings);
+    // 4. Publish check
+    const publishSpin = json ? null : new Spinner("Checking publish safety…").start();
+    const publishResult = runPublishCheck();
+    if (!json) {
+      if (publishResult.findings.length === 0) publishSpin!.succeed("Publish config looks good");
+      else publishSpin!.fail(`Publish check: ${publishResult.findings.length} issue(s) found`);
+      renderFindings(publishResult.findings, "Publish Safety");
+    }
+    allFindings.push(...publishResult.findings);
+
+    if (json) {
+      renderJson(allFindings);
+    } else {
+      renderSummary(allFindings);
+    }
     const severe = allFindings.some((f) => f.severity === "critical" || f.severity === "high");
     process.exit(severe ? 1 : 0);
   });

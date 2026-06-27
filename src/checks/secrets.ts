@@ -102,6 +102,44 @@ function checkEnvVarUsage(path: string, findings: Finding[], tool: string): void
   }
 }
 
+function checkTokenScope(path: string, findings: Finding[], tool: string): void {
+  const content = readFile(path);
+  if (!content) return;
+
+  // Modern npm tokens start with "npm_" — publish tokens are higher risk than read-only
+  // Granular tokens (npm_...) vs legacy tokens (UUID-like)
+  const publishTokenPattern = /\/\/[^:]+:_authToken=(npm_[A-Za-z0-9]{35,})/g;
+  const legacyTokenPattern = /\/\/[^:]+:_authToken=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/g;
+
+  // Legacy tokens are automation tokens — always full publish scope, highest risk
+  const legacyMatches = Array.from(content.matchAll(legacyTokenPattern));
+  for (const _ of legacyMatches) {
+    findings.push({
+      severity: "high",
+      tool,
+      file: path,
+      rule: "legacy-publish-token",
+      message: `Legacy npm token (UUID format) detected. These are automation tokens with full publish scope and cannot be scoped down. Replace with a granular read-only token if publish access is not needed here.`,
+      fix: `Generate a granular read-only token at https://www.npmjs.com/settings/<username>/tokens/new and replace the UUID token in ${path}`,
+      agentPrompt: `Open ${path}. The file contains a legacy UUID-format npm token on a _authToken line. Remind the user to: (1) go to https://www.npmjs.com/settings/<username>/tokens and create a new granular token with read-only scope, (2) replace the UUID token in ${path} with the new token value wrapped in \${NPM_TOKEN} env var reference, (3) revoke the old UUID token. Do not modify the file directly — token rotation requires user action.`,
+    });
+  }
+
+  // Modern npm_ tokens — flag if they look like they might be publish tokens
+  // (we can't tell scope from the token value alone, so flag as advisory)
+  const modernMatches = Array.from(content.matchAll(publishTokenPattern));
+  for (const _ of modernMatches) {
+    findings.push({
+      severity: "info",
+      tool,
+      file: path,
+      rule: "token-scope-unverified",
+      message: `npm token found. Verify it is scoped to the minimum required permissions (read-only if publish is not needed in this context).`,
+      fix: `Check token scope at https://www.npmjs.com/settings/<username>/tokens`,
+    });
+  }
+}
+
 const CONFIG_FILES = [
   { path: join(HOME, ".npmrc"), tool: "npm" },
   { path: ".npmrc", tool: "npm" },
@@ -121,6 +159,7 @@ export function runSecretsCheck(): CheckResult {
     scanFileForSecrets(path, findings, tool);
     checkFilePermissions(path, findings, tool);
     checkEnvVarUsage(path, findings, tool);
+    checkTokenScope(path, findings, tool);
     // Only check git tracking for project-level files (not home dir ones)
     if (!path.startsWith(HOME)) {
       checkGitTracked(path, findings, tool);

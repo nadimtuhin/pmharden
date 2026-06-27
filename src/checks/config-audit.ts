@@ -173,6 +173,19 @@ function auditPnpmrc(findings: Finding[]): void {
       agentPrompt: `Open ${path} and add the line "block-exotic-subdeps=true" if it is not already present. Do not change any other lines.`,
     });
   }
+
+  // onlyBuiltDependencies (pnpm 9+) — allowlist for packages permitted to run build scripts
+  if (!content.includes("only-built-dependencies") && !content.includes("onlyBuiltDependencies")) {
+    findings.push({
+      severity: "medium",
+      tool: "pnpm",
+      file: path,
+      rule: "no-only-built-dependencies",
+      message: `onlyBuiltDependencies not set (pnpm 9+). Without an allowlist, any dep can run build scripts even with strict-dep-builds=true on fresh installs.`,
+      fix: `Add to ${path}:\nonly-built-dependencies[]=esbuild\nonly-built-dependencies[]=@swc/core\n# list every package you explicitly trust to run postinstall`,
+      agentPrompt: `Open ${path} and add an onlyBuiltDependencies allowlist. Start with only the packages in the current project that genuinely need build scripts (e.g. esbuild, @swc/core, canvas). Add lines like:\nonly-built-dependencies[]=esbuild\nDo not add packages speculatively. Do not change any other lines.`,
+    });
+  }
 }
 
 // ─── yarn ──────────────────────────────────────────────────────────────────

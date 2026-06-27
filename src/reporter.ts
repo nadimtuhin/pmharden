@@ -19,6 +19,10 @@ const SEVERITY_ICON: Record<Severity, string> = {
   info: "·",
 };
 
+export function renderJson(findings: Finding[]): void {
+  process.stdout.write(JSON.stringify(findings, null, 2) + "\n");
+}
+
 export function renderFindings(findings: Finding[], title: string): void {
   if (findings.length === 0) {
     console.log(chalk.green(`✔ ${title}: No issues found`));
