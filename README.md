@@ -9,7 +9,7 @@
 
 ---
 
-**June 2026.** The `@mastra/core` npm account was compromised. A malicious dependency was injected into 140+ packages. The postinstall script ran automatically on `npm install`, exfiltrated tokens, passwords, and crypto wallet extensions — then used the stolen publish token to spread to more packages. `@mastra/core` has 918,000 weekly downloads.
+**June 2026.** Someone hijacked the `@mastra/core` npm account and slipped a malicious dep into 140+ packages. On `npm install`, the postinstall script grabbed tokens, passwords, and crypto wallet extensions, then used the stolen publish token to push the same payload to more packages. `@mastra/core` has 918,000 weekly downloads.
 
 Your `~/.npmrc` has your publish token in it. Every package you install can read it. `npm audit` doesn't check config files. Socket.dev doesn't check config files. Nothing does — except this.
 
@@ -21,7 +21,7 @@ npx pmharden
 
 ## What I found on my own machine
 
-I ran this on my own machine and found a plaintext npm token in `~/.npmrc` — readable by any `postinstall` script on any package I'd ever installed. The token had been sitting there for years. If `eslint-scope` had hit me in 2018, it would have used that token to publish malicious versions of every package I own.
+I ran this on my own machine and found a plaintext npm token in `~/.npmrc`. It had been sitting there for years, readable by every postinstall script I'd ever run. If eslint-scope had hit my machine in 2018, it would have used that token to push malicious versions of every package I own.
 
 ---
 
@@ -87,7 +87,7 @@ Use it alongside `npm audit`, not instead of it.
 
 ### postinstall execution
 
-Every package you install can run arbitrary code during `npm install` unless `ignore-scripts=true` is set.
+Every package you install can run arbitrary code on `npm install` unless `ignore-scripts=true` is set.
 
 | Attack | Year | What happened |
 |--------|------|---------------|
@@ -123,11 +123,9 @@ Malicious packages often get reported and pulled within days. If you install the
 
 ## AI scanner evasion (2026)
 
-Attackers are now actively targeting AI-based malware scanners, not just human reviewers.
+Attackers have started embedding fake prompt-injection headers and safety-triggering content to fool AI-based malware scanners — filling 9MB of a package's `index.js` with Japanese-language bioweapon content in block comments, then appending the actual stealer at the end. The idea is to hit the scanner's token limit or trigger its safety filters before it reaches the payload.
 
-The Mini Shai-Hulud / Miasma campaign began [prepending fake prompt-injection headers](https://socket.dev/blog/npm-package-uses-prompt-injection-and-token-flooding-to-disrupt-ai-malware-scanners) to obfuscated payloads — comments designed to trigger AI safety filters, flood token context windows, or convince LLM-based scanners to misclassify the file before reaching the actual malicious code. One package (`shai_hulululud@1.0.48596`) shipped a 9MB `index.js` consisting almost entirely of safety-triggering Japanese-language bioweapon content in block comments, with the actual obfuscated stealer appended at the end.
-
-This does not affect `pmharden`. Static config auditing and token scanning read structured files (`.npmrc`, `.pnpmrc`, etc.), not arbitrary JavaScript. But it is a signal that AI-assisted review tooling in your pipeline needs adversarial testing.
+`pmharden` isn't affected by this. It reads structured config files, not JavaScript. But if you're using AI-assisted review anywhere in your pipeline, those tools need adversarial testing against this pattern.
 
 ---
 
