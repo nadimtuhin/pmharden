@@ -1,10 +1,6 @@
 # pmharden
 
-Audits the environment your npm/pnpm/yarn/bun installs run in — not just the packages.
-
-```bash
-npx pmharden
-```
+> Every package you `npm install` can read your `~/.npmrc`. Right now.
 
 [![CI](https://github.com/nadimtuhin/pmharden/actions/workflows/ci.yml/badge.svg)](https://github.com/nadimtuhin/pmharden/actions/workflows/ci.yml)
 [![npm version](https://badge.fury.io/js/pmharden.svg)](https://www.npmjs.com/package/pmharden)
@@ -13,13 +9,19 @@ npx pmharden
 
 ---
 
-## The problem
+**June 2026.** The `@mastra/core` npm account was compromised. A malicious dependency was injected into 140+ packages. The postinstall script ran automatically on `npm install`, exfiltrated tokens, passwords, and crypto wallet extensions — then used the stolen publish token to spread to more packages. `@mastra/core` has 918,000 weekly downloads.
 
-I ran this on my own machine and found a plaintext npm token in `~/.npmrc` — readable by any `postinstall` script on any package I'd ever installed.
+Your `~/.npmrc` has your publish token in it. Every package you install can read it. `npm audit` doesn't check config files. Socket.dev doesn't check config files. Nothing does — except this.
 
-That's the same attack that hit eslint-scope in 2018. A compromised maintainer account pushed a malicious version. The postinstall script read `~/.npmrc`, sent the auth token to an attacker server, then used it to publish more malicious packages. Self-propagating.
+```bash
+npx pmharden
+```
 
-The token had been sitting there for years. `npm audit` never flagged it. Socket.dev never flagged it. Neither tool looks at your config files.
+---
+
+## What I found on my own machine
+
+I ran this on my own machine and found a plaintext npm token in `~/.npmrc` — readable by any `postinstall` script on any package I'd ever installed. The token had been sitting there for years. If `eslint-scope` had hit me in 2018, it would have used that token to publish malicious versions of every package I own.
 
 ---
 
