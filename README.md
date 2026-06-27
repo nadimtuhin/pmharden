@@ -9,6 +9,7 @@ npx pmharden
 [![CI](https://github.com/nadimtuhin/pmharden/actions/workflows/ci.yml/badge.svg)](https://github.com/nadimtuhin/pmharden/actions/workflows/ci.yml)
 [![npm version](https://badge.fury.io/js/pmharden.svg)](https://www.npmjs.com/package/pmharden)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Security Policy](https://img.shields.io/badge/security-policy-blue.svg)](SECURITY.md)
 
 ---
 
@@ -166,15 +167,14 @@ Exit code `1` on CRITICAL/HIGH. Suitable for blocking merges.
 
 ## Contributing
 
-Good first issues:
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to add a new check, run tests, and submit a PR.
 
+Good first issues:
 - `binding.gyp` detection — pure-JS packages with native build files (typosquat signal)
-- Token scope checking — distinguish publish tokens from read-only tokens
-- pnpm `onlyBuiltDependencies` allowlist enforcement
 - Bun lockfile integrity checks
 - `--fix` flag — auto-apply safe remediations to config files
 
-See [AGENTS.md](AGENTS.md) for the full contribution guide including how to add a new check.
+See [SECURITY.md](SECURITY.md) for how to report vulnerabilities privately.
 
 ---
 
