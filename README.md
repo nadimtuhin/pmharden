@@ -7,6 +7,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Security Policy](https://img.shields.io/badge/security-policy-blue.svg)](SECURITY.md)
 
+![pmharden in action](https://media.licdn.com/dms/image/v2/D5622AQFXPyZD4826PA/feedshare-image-high-res/B56Z8Po_HdHIAY-/0/1782673830627?e=1784160000&v=beta&t=lnF-Ytnb7oHO4qgwH-o6P2ClZ47PFa3NKBQttRjftJw)
+
 ---
 
 **June 2026.** Someone hijacked the `@mastra/core` npm account and slipped a malicious dep into 140+ packages. On `npm install`, the postinstall script grabbed tokens, passwords, and crypto wallet extensions, then used the stolen publish token to push the same payload to more packages. `@mastra/core` has 918,000 weekly downloads.
