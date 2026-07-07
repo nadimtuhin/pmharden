@@ -115,6 +115,19 @@ function auditNpmrc(path: string, findings: Finding[], skips: string[]): void {
 // 11 canonical), ~/.config/pnpm/config.yaml (global, pnpm >= 11, XDG default),
 // and the project .npmrc (pnpm 10.x kebab-case keys).
 
+function usesPnpm(home: string, cwd: string, hasWorkspace: boolean, hasGlobal: boolean): boolean {
+  if (hasWorkspace || hasGlobal) return true;
+  if (fileExists(join(cwd, "pnpm-lock.yaml"))) return true;
+  const pkgContent = readFile(join(cwd, "package.json"));
+  if (!pkgContent) return false;
+  try {
+    const pkg = JSON.parse(pkgContent) as { packageManager?: string };
+    return typeof pkg.packageManager === "string" && pkg.packageManager.startsWith("pnpm");
+  } catch {
+    return false; // malformed package.json is publish-check's concern, not ours
+  }
+}
+
 function auditPnpm(findings: Finding[], home: string, cwd: string, skips: string[]): void {
   const workspaceYaml = join(cwd, "pnpm-workspace.yaml");
   const globalYaml = join(home, ".config", "pnpm", "config.yaml");
@@ -123,12 +136,27 @@ function auditPnpm(findings: Finding[], home: string, cwd: string, skips: string
   const hasWorkspace = fileExists(workspaceYaml);
   const hasGlobal = fileExists(globalYaml);
 
+  // No evidence this project uses pnpm at all (no lockfile, no packageManager field,
+  // no workspace/global config) — checking its .npmrc for pnpm-only keys would flag
+  // every npm-only project that happens to have a policy .npmrc. Note-only and stop.
+  if (!usesPnpm(home, cwd, hasWorkspace, hasGlobal)) {
+    findings.push({
+      severity: "info",
+      tool: "pnpm",
+      rule: "no-pnpm-config",
+      message: `No pnpm usage detected (no pnpm-lock.yaml, workspace config, or "packageManager" field). Skipping pnpm-specific hardening checks.`,
+      fix: `If this project uses pnpm, add pnpm-workspace.yaml:\nstrictDepBuilds: true\nminimumReleaseAge: 10080`,
+      agentPrompt: `Only relevant if this project uses pnpm. If so, create pnpm-workspace.yaml at the project root with:\nstrictDepBuilds: true\nminimumReleaseAge: 10080`,
+    });
+    return;
+  }
+
   if (!hasWorkspace && !hasGlobal) {
     findings.push({
       severity: "info",
       tool: "pnpm",
       rule: "no-pnpm-config",
-      message: `No pnpm config found (only relevant if you use pnpm).`,
+      message: `pnpm is in use but no pnpm-workspace.yaml or global config was found.`,
       fix: `Add to pnpm-workspace.yaml:\nstrictDepBuilds: true\nminimumReleaseAge: 10080`,
       agentPrompt: `Create or edit pnpm-workspace.yaml at the project root and add:\nstrictDepBuilds: true\nminimumReleaseAge: 10080\nDo not change any other lines.`,
     });

@@ -134,7 +134,36 @@ describe("config-audit pnpm rules", () => {
     rmSync(cwd, { recursive: true, force: true });
   });
 
-  it("empty home+cwd fires no-pnpm-config, no-strict-dep-builds, no-minimum-release-age", () => {
+  it("no pnpm evidence (no lockfile, no packageManager field): only no-pnpm-config fires, not the pnpm hardening rules", () => {
+    const result = runConfigAudit({ home, cwd });
+    const rules = new Set(result.findings.map((f) => f.rule));
+
+    expect(rules.has("no-pnpm-config")).toBe(true);
+    expect(rules.has("no-strict-dep-builds")).toBe(false);
+    expect(rules.has("no-minimum-release-age")).toBe(false);
+  });
+
+  it("npm-only project (plain .npmrc, no pnpm evidence) never fires pnpm hardening rules", () => {
+    writeFileSync(join(cwd, ".npmrc"), "ignore-scripts=true\n");
+    const result = runConfigAudit({ home, cwd });
+    const rules = new Set(result.findings.map((f) => f.rule));
+
+    expect(rules.has("no-strict-dep-builds")).toBe(false);
+    expect(rules.has("no-minimum-release-age")).toBe(false);
+  });
+
+  it("pnpm-lock.yaml present (but no workspace/global config) fires the full pnpm hardening set", () => {
+    writeFileSync(join(cwd, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+    const result = runConfigAudit({ home, cwd });
+    const rules = new Set(result.findings.map((f) => f.rule));
+
+    expect(rules.has("no-pnpm-config")).toBe(true);
+    expect(rules.has("no-strict-dep-builds")).toBe(true);
+    expect(rules.has("no-minimum-release-age")).toBe(true);
+  });
+
+  it('package.json "packageManager": "pnpm@..." (but no lockfile/config) fires the full pnpm hardening set', () => {
+    writeFileSync(join(cwd, "package.json"), JSON.stringify({ packageManager: "pnpm@9.0.0" }));
     const result = runConfigAudit({ home, cwd });
     const rules = new Set(result.findings.map((f) => f.rule));
 
