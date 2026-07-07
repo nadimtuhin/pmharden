@@ -22,9 +22,12 @@ function parseNpmrc(content: string): Record<string, string> {
   return cfg;
 }
 
-function auditNpmrc(path: string, findings: Finding[]): void {
+function auditNpmrc(path: string, findings: Finding[], skips: string[]): void {
   const content = readFile(path);
-  if (!content) return;
+  if (content === null) {
+    skips.push(`could not read ${path}`);
+    return;
+  }
 
   const cfg = parseNpmrc(content);
   const tool = "npm";
@@ -112,7 +115,7 @@ function auditNpmrc(path: string, findings: Finding[]): void {
 // 11 canonical), ~/.config/pnpm/config.yaml (global, pnpm >= 11, XDG default),
 // and the project .npmrc (pnpm 10.x kebab-case keys).
 
-function auditPnpm(findings: Finding[], home: string, cwd: string): void {
+function auditPnpm(findings: Finding[], home: string, cwd: string, skips: string[]): void {
   const workspaceYaml = join(cwd, "pnpm-workspace.yaml");
   const globalYaml = join(home, ".config", "pnpm", "config.yaml");
   const projectNpmrc = join(cwd, ".npmrc");
@@ -132,7 +135,13 @@ function auditPnpm(findings: Finding[], home: string, cwd: string): void {
   }
 
   const sources = [workspaceYaml, globalYaml, projectNpmrc].filter((p) => fileExists(p));
-  const combined = sources.map((p) => readFile(p) ?? "").join("\n");
+  const combined = sources
+    .map((p) => {
+      const content = readFile(p);
+      if (content === null) skips.push(`could not read ${p}`);
+      return content ?? "";
+    })
+    .join("\n");
   const primarySource = hasWorkspace ? workspaceYaml : sources[0];
   const fileField = primarySource ? { file: primarySource } : {};
 
@@ -175,12 +184,16 @@ function auditPnpm(findings: Finding[], home: string, cwd: string): void {
 
 // ─── yarn ──────────────────────────────────────────────────────────────────
 
-function auditYarnrc(findings: Finding[], home: string): void {
+function auditYarnrc(findings: Finding[], home: string, skips: string[]): void {
   const v2path = join(home, ".yarnrc.yml");
   const v1path = join(home, ".yarnrc");
 
   if (fileExists(v2path)) {
-    const content = readFile(v2path)!;
+    const content = readFile(v2path);
+    if (content === null) {
+      skips.push(`could not read ${v2path}`);
+      return;
+    }
     if (!content.includes("enableScripts: false")) {
       findings.push({
         severity: "low",
@@ -218,7 +231,7 @@ function auditYarnrc(findings: Finding[], home: string): void {
 
 // ─── bun ───────────────────────────────────────────────────────────────────
 
-function auditBunfig(findings: Finding[], home: string): void {
+function auditBunfig(findings: Finding[], home: string, skips: string[]): void {
   const path = join(home, ".bunfig.toml");
   if (!fileExists(path)) {
     findings.push({
@@ -232,7 +245,11 @@ function auditBunfig(findings: Finding[], home: string): void {
     return;
   }
 
-  const content = readFile(path)!;
+  const content = readFile(path);
+  if (content === null) {
+    skips.push(`could not read ${path}`);
+    return;
+  }
   if (!content.includes("registry")) {
     findings.push({
       severity: "low",
@@ -252,13 +269,14 @@ export function runConfigAudit(ctx: CheckContext = {}): CheckResult {
   const home = ctx.home ?? HOME;
   const cwd = ctx.cwd ?? process.cwd();
   const findings: Finding[] = [];
+  const skips: string[] = [];
 
   // npm: check both global and local .npmrc
   const npmrcPaths = [join(home, ".npmrc"), join(cwd, ".npmrc")];
   let foundNpmrc = false;
   for (const p of npmrcPaths) {
     if (fileExists(p)) {
-      auditNpmrc(p, findings);
+      auditNpmrc(p, findings, skips);
       foundNpmrc = true;
     }
   }
@@ -273,9 +291,9 @@ export function runConfigAudit(ctx: CheckContext = {}): CheckResult {
     });
   }
 
-  auditPnpm(findings, home, cwd);
-  auditYarnrc(findings, home);
-  auditBunfig(findings, home);
+  auditPnpm(findings, home, cwd, skips);
+  auditYarnrc(findings, home, skips);
+  auditBunfig(findings, home, skips);
 
-  return { findings };
+  return { findings, ...(skips.length ? { skipped: skips.join("; ") } : {}) };
 }

@@ -186,6 +186,36 @@ describe("config-audit pnpm rules", () => {
   });
 });
 
+describe("config-audit unreadable npmrc", () => {
+  let home: string;
+  let cwd: string;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "pmharden-unreadable-home-"));
+    cwd = mkdtempSync(join(tmpdir(), "pmharden-cwd-"));
+    writeFileSync(join(home, ".npmrc"), "ignore-scripts=true\n");
+  });
+
+  afterEach(() => {
+    chmodSync(join(home, ".npmrc"), 0o600);
+    rmSync(home, { recursive: true, force: true });
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  // root can read chmod 0o000 files, so this fault-injection doesn't apply when running as root.
+  it.skipIf(process.getuid?.() === 0)(
+    "unreadable .npmrc (chmod 000) fires skipped naming the path",
+    () => {
+      chmodSync(join(home, ".npmrc"), 0o000);
+
+      const result = runConfigAudit({ home, cwd });
+
+      expect(result.skipped).toBeDefined();
+      expect(result.skipped).toContain(join(home, ".npmrc"));
+    }
+  );
+});
+
 describe("config-audit yarn rules", () => {
   let home: string;
   let cwd: string;

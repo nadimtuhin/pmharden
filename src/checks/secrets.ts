@@ -16,10 +16,7 @@ const SECRET_PATTERNS: Array<{ name: string; regex: RegExp }> = [
   { name: "generic-secret", regex: /(?:secret|password|passwd|token|apikey|api_key)\s*=\s*(?!\$\{)[^\s]{6,}/gi },
 ];
 
-function scanFileForSecrets(path: string, findings: Finding[], tool: string): void {
-  const content = readFile(path);
-  if (!content) return;
-
+function scanFileForSecrets(path: string, content: string, findings: Finding[], tool: string): void {
   for (const pattern of SECRET_PATTERNS) {
       const matches = Array.from(content.matchAll(pattern.regex));
     for (const match of matches) {
@@ -54,12 +51,9 @@ function checkFilePermissions(path: string, findings: Finding[], tool: string): 
   }
 }
 
-function checkGitTracked(path: string, findings: Finding[], tool: string, cwd: string): void {
-  if (!fileExists(path)) return;
+function checkGitTracked(path: string, content: string, findings: Finding[], tool: string, cwd: string): void {
   // Only flag if the file is git-tracked AND contains secrets.
   // A committed .npmrc with only policy settings (ignore-scripts etc.) is intentional.
-  const content = readFile(path);
-  if (!content) return;
   const hasSecret = SECRET_PATTERNS.some((p) => {
     p.regex.lastIndex = 0;
     return p.regex.test(content);
@@ -81,10 +75,7 @@ function checkGitTracked(path: string, findings: Finding[], tool: string, cwd: s
   }
 }
 
-function checkEnvVarUsage(path: string, findings: Finding[], tool: string): void {
-  const content = readFile(path);
-  if (!content) return;
-
+function checkEnvVarUsage(path: string, content: string, findings: Finding[], tool: string): void {
   // If file has _authToken lines but they use env var syntax — good, no finding
   // If they do NOT use ${...} — already caught by scanFileForSecrets
   // Here we check for "token line exists but is empty" which might mean deleted but not rotated
@@ -102,10 +93,7 @@ function checkEnvVarUsage(path: string, findings: Finding[], tool: string): void
   }
 }
 
-function checkTokenScope(path: string, findings: Finding[], tool: string): void {
-  const content = readFile(path);
-  if (!content) return;
-
+function checkTokenScope(path: string, content: string, findings: Finding[], tool: string): void {
   // Modern npm tokens start with "npm_" — publish tokens are higher risk than read-only
   // Granular tokens (npm_...) vs legacy tokens (UUID-like)
   const publishTokenPattern = /\/\/[^:]+:_authToken=(npm_[A-Za-z0-9]{35,})/g;
@@ -144,6 +132,7 @@ export function runSecretsCheck(ctx: CheckContext = {}): CheckResult {
   const home = ctx.home ?? HOME;
   const cwd = ctx.cwd ?? process.cwd();
   const findings: Finding[] = [];
+  const skips: string[] = [];
 
   const CONFIG_FILES = [
     { path: join(home, ".npmrc"), tool: "npm" },
@@ -158,15 +147,20 @@ export function runSecretsCheck(ctx: CheckContext = {}): CheckResult {
 
   for (const { path, tool } of CONFIG_FILES) {
     if (!fileExists(path)) continue;
-    scanFileForSecrets(path, findings, tool);
+    const content = readFile(path);
+    if (content === null) {
+      skips.push(`could not read ${path}`);
+      continue;
+    }
+    scanFileForSecrets(path, content, findings, tool);
     checkFilePermissions(path, findings, tool);
-    checkEnvVarUsage(path, findings, tool);
-    checkTokenScope(path, findings, tool);
+    checkEnvVarUsage(path, content, findings, tool);
+    checkTokenScope(path, content, findings, tool);
     // Only check git tracking for project-level files (not home dir ones)
     if (!path.startsWith(home)) {
-      checkGitTracked(path, findings, tool, cwd);
+      checkGitTracked(path, content, findings, tool, cwd);
     }
   }
 
-  return { findings };
+  return { findings, ...(skips.length ? { skipped: skips.join("; ") } : {}) };
 }

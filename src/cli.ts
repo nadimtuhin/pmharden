@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from "fs";
 import { Command } from "commander";
+import chalk from "chalk";
 import { runConfigAudit } from "./checks/config-audit.js";
 import { runSecretsCheck } from "./checks/secrets.js";
 import { runGlobalAudit } from "./checks/global-audit.js";
@@ -31,6 +32,7 @@ program
     }
     spin!.succeed("Config audit done");
     renderFindings(result.findings, "Config Audit");
+    if (result.skipped) console.log(chalk.yellow(`⚠ ${result.skipped}`));
     const severe = renderSummary(result.findings);
     process.exit(severe ? 1 : 0);
   });
@@ -48,6 +50,7 @@ program
     }
     spin!.succeed("Secrets scan done");
     renderFindings(result.findings, "Secrets Scan");
+    if (result.skipped) console.log(chalk.yellow(`⚠ ${result.skipped}`));
     const severe = renderSummary(result.findings);
     process.exit(severe ? 1 : 0);
   });
@@ -71,12 +74,13 @@ program
       renderJson(result.findings ?? []);
       process.exit((result.findings ?? []).some((f) => f.severity === "critical" || f.severity === "high") ? 1 : 0);
     }
-    if (result.skipped) {
+    if (result.skipped && result.findings.length === 0) {
       spin!.succeed(result.skipped);
       process.exit(0);
     }
     spin!.succeed(`Global audit done`);
     renderFindings(result.findings, "Global Package Audit");
+    if (result.skipped) console.log(chalk.yellow(`⚠ ${result.skipped}`));
     const severe = renderSummary(result.findings);
     process.exit(severe ? 1 : 0);
   });
@@ -97,6 +101,7 @@ program
       if (configResult.findings.length === 0) configSpin!.succeed("Config files look good");
       else configSpin!.fail(`Config audit: ${configResult.findings.length} issue(s) found`);
       renderFindings(configResult.findings, "Config Audit");
+      if (configResult.skipped) console.log(chalk.yellow(`⚠ ${configResult.skipped}`));
     }
     allFindings.push(...configResult.findings);
 
@@ -107,6 +112,7 @@ program
       if (secretsResult.findings.length === 0) secretsSpin!.succeed("No secrets found");
       else secretsSpin!.fail(`Secrets: ${secretsResult.findings.length} issue(s) found`);
       renderFindings(secretsResult.findings, "Secrets Scan");
+      if (secretsResult.skipped) console.log(chalk.yellow(`⚠ ${secretsResult.skipped}`));
     }
     allFindings.push(...secretsResult.findings);
 
@@ -122,10 +128,13 @@ program
           }
     );
     if (!json) {
-      if (globalResult.skipped) globalSpin!.succeed(globalResult.skipped);
+      if (globalResult.skipped && globalResult.findings.length === 0) globalSpin!.succeed(globalResult.skipped);
       else if (globalResult.findings.length === 0) globalSpin!.succeed("Global packages look good");
       else globalSpin!.fail(`Global audit: ${globalResult.findings.length} issue(s) found`);
       renderFindings(globalResult.findings ?? [], "Global Package Audit");
+      if (globalResult.skipped && globalResult.findings.length > 0) {
+        console.log(chalk.yellow(`⚠ ${globalResult.skipped}`));
+      }
     }
     allFindings.push(...(globalResult.findings ?? []));
 
@@ -136,6 +145,7 @@ program
       if (publishResult.findings.length === 0) publishSpin!.succeed("Publish config looks good");
       else publishSpin!.fail(`Publish check: ${publishResult.findings.length} issue(s) found`);
       renderFindings(publishResult.findings, "Publish Safety");
+      if (publishResult.skipped) console.log(chalk.yellow(`⚠ ${publishResult.skipped}`));
     }
     allFindings.push(...publishResult.findings);
 

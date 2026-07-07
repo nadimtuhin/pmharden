@@ -95,12 +95,16 @@ describe("publish-check no package.json", () => {
 });
 
 describe("publish-check malformed package.json", () => {
-  it("invalid JSON produces zero findings today (silent) — TASK-06 will surface this via `skipped`", () => {
+  it("invalid JSON fires skipped naming the path and a parse failure, with zero findings", () => {
     const cwd = makeCwd();
-    writeFileSync(join(cwd, "package.json"), "{ this is not valid json");
+    const pkgPath = join(cwd, "package.json");
+    writeFileSync(pkgPath, "{ this is not valid json");
 
     const result = runPublishCheck({ cwd });
 
     expect(result.findings).toEqual([]);
+    expect(result.skipped).toBeDefined();
+    expect(result.skipped).toContain(pkgPath);
+    expect(result.skipped?.toLowerCase()).toContain("pars");
   });
 });

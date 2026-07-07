@@ -47,9 +47,9 @@ function defaultExec(cmd: string, args: string[]): string | null {
 
 type Exec = (cmd: string, args: string[]) => string | null;
 
-function getNpmGlobals(exec: Exec): GlobalPackage[] {
+function getNpmGlobals(exec: Exec): GlobalPackage[] | null {
   const out = exec("npm", ["list", "-g", "--depth=0", "--json"]);
-  if (!out) return [];
+  if (!out) return null;
   try {
     const parsed = JSON.parse(out) as { dependencies?: Record<string, { version: string }> };
     return Object.entries(parsed.dependencies ?? {}).map(([name, info]) => ({
@@ -58,13 +58,13 @@ function getNpmGlobals(exec: Exec): GlobalPackage[] {
       pm: "npm",
     }));
   } catch {
-    return [];
+    return null;
   }
 }
 
-function getPnpmGlobals(exec: Exec): GlobalPackage[] {
+function getPnpmGlobals(exec: Exec): GlobalPackage[] | null {
   const out = exec("pnpm", ["list", "-g", "--json"]);
-  if (!out) return [];
+  if (!out) return null;
   try {
     const parsed = JSON.parse(out) as Array<{ dependencies?: Record<string, { version: string }> }>;
     const deps = parsed[0]?.dependencies ?? {};
@@ -74,13 +74,13 @@ function getPnpmGlobals(exec: Exec): GlobalPackage[] {
       pm: "pnpm",
     }));
   } catch {
-    return [];
+    return null;
   }
 }
 
-function getYarnGlobals(exec: Exec): GlobalPackage[] {
+function getYarnGlobals(exec: Exec): GlobalPackage[] | null {
   const out = exec("yarn", ["global", "list", "--json"]);
-  if (!out) return [];
+  if (!out) return null;
   const pkgs: GlobalPackage[] = [];
   for (const line of out.split("\n")) {
     if (!line.trim()) continue;
@@ -126,10 +126,23 @@ export function runGlobalAudit(
   const onProgress = ctx.onProgress;
   const findings: Finding[] = [];
 
+  const npmResult = getNpmGlobals(exec);
+  const pnpmResult = getPnpmGlobals(exec);
+  const yarnResult = getYarnGlobals(exec);
+
+  if (npmResult === null && pnpmResult === null && yarnResult === null) {
+    return { findings, skipped: "npm/pnpm/yarn list commands failed — global packages were NOT audited" };
+  }
+
+  const failureNotes: string[] = [];
+  if (npmResult === null) failureNotes.push("npm list failed — npm globals not audited");
+  if (pnpmResult === null) failureNotes.push("pnpm list failed — pnpm globals not audited");
+  if (yarnResult === null) failureNotes.push("yarn list failed — yarn globals not audited");
+
   const allGlobals: GlobalPackage[] = [
-    ...getNpmGlobals(exec),
-    ...getPnpmGlobals(exec),
-    ...getYarnGlobals(exec),
+    ...(npmResult ?? []),
+    ...(pnpmResult ?? []),
+    ...(yarnResult ?? []),
   ];
 
   // Dedupe by name (keep first seen)
@@ -195,5 +208,5 @@ export function runGlobalAudit(
     }
   }
 
-  return { findings };
+  return { findings, ...(failureNotes.length ? { skipped: failureNotes.join("; ") } : {}) };
 }

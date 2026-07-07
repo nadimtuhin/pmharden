@@ -22,7 +22,9 @@ export function runPublishCheck(ctx: CheckContext = {}): CheckResult {
   if (!existsSync(pkgPath)) return { findings };
 
   const pkg = readJson(pkgPath);
-  if (!pkg) return { findings };
+  if (!pkg) {
+    return { findings, skipped: `could not parse ${pkgPath} — publish safety was NOT checked` };
+  }
 
   // Skip private packages — they can't be published
   if (pkg.private === true) return { findings };

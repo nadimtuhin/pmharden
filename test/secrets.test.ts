@@ -89,4 +89,23 @@ describe("secrets check", () => {
     const emptyFinding = result.findings.find((f) => f.rule === "empty-token-line");
     expect(emptyFinding?.severity).toBe("medium");
   });
+
+  // root can read chmod 0o000 files, so this fault-injection doesn't apply when running as root.
+  it.skipIf(process.getuid?.() === 0)(
+    "unreadable .npmrc (chmod 000) fires skipped naming the path, with no plaintext findings claimed",
+    () => {
+      writeFileSync(join(home, ".npmrc"), `//registry.npmjs.org/:_authToken=${"npm_" + "a".repeat(40)}\n`);
+      chmodSync(join(home, ".npmrc"), 0o000);
+
+      try {
+        const result = runSecretsCheck({ home, cwd });
+
+        expect(result.skipped).toBeDefined();
+        expect(result.skipped).toContain(join(home, ".npmrc"));
+        expect(result.findings.some((f) => f.rule.startsWith("plaintext-"))).toBe(false);
+      } finally {
+        chmodSync(join(home, ".npmrc"), 0o600);
+      }
+    }
+  );
 });

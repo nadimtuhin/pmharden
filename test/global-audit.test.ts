@@ -116,15 +116,50 @@ describe("global-audit install scripts", () => {
 });
 
 describe("global-audit no globals", () => {
-  it("returns skipped and zero findings when all list commands return null", () => {
-    // NOTE: a MISSING npm binary is indistinguishable from zero installed globals
-    // with the current implementation — this is TASK-06's target, not fixed here.
-    const { exec } = makeFakeExec({});
+  it("all three commands succeed but report zero deps -> skipped 'No global packages found'", () => {
+    const { exec } = makeFakeExec({
+      npmList: JSON.stringify({ dependencies: {} }),
+      pnpmList: JSON.stringify([{ dependencies: {} }]),
+      yarnList: JSON.stringify({ type: "info", data: { items: [] } }),
+    });
 
     const result = runGlobalAudit({ exec });
 
     expect(result.skipped).toBe("No global packages found");
     expect(result.findings).toEqual([]);
+  });
+});
+
+describe("global-audit all commands failed", () => {
+  it("all list commands return null -> skipped says commands failed, NOT 'No global packages found'", () => {
+    const { exec } = makeFakeExec({});
+
+    const result = runGlobalAudit({ exec });
+
+    expect(result.skipped).toBeDefined();
+    expect(result.skipped).not.toBe("No global packages found");
+    expect(result.skipped?.toLowerCase()).toContain("failed");
+    expect(result.findings).toEqual([]);
+  });
+});
+
+describe("global-audit partial command failure", () => {
+  it("npm succeeds with a package while pnpm/yarn fail -> findings still processed, skipped names pnpm+yarn failure", () => {
+    const { exec } = makeFakeExec({
+      npmList: JSON.stringify({ dependencies: { "some-pkg": { version: "1.0.0" } } }),
+      pnpmList: null,
+      yarnList: null,
+      latestVersions: { "some-pkg": "1.0.0" },
+      scripts: { "some-pkg@1.0.0": JSON.stringify({ postinstall: "node x.js" }) },
+    });
+
+    const result = runGlobalAudit({ exec });
+
+    const finding = result.findings.find((f) => f.rule === "global-with-install-scripts");
+    expect(finding).toBeDefined();
+    expect(result.skipped).toBeDefined();
+    expect(result.skipped).toContain("pnpm");
+    expect(result.skipped).toContain("yarn");
   });
 });
 
