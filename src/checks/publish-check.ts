@@ -4,7 +4,7 @@
  */
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
-import type { CheckResult, Finding } from "../utils/types.js";
+import type { CheckContext, CheckResult, Finding } from "../utils/types.js";
 
 function readJson(path: string): Record<string, unknown> | null {
   try {
@@ -14,9 +14,10 @@ function readJson(path: string): Record<string, unknown> | null {
   }
 }
 
-export function runPublishCheck(): CheckResult {
+export function runPublishCheck(ctx: CheckContext = {}): CheckResult {
+  const cwd = ctx.cwd ?? process.cwd();
   const findings: Finding[] = [];
-  const pkgPath = join(process.cwd(), "package.json");
+  const pkgPath = join(cwd, "package.json");
 
   if (!existsSync(pkgPath)) return { findings };
 
@@ -27,7 +28,7 @@ export function runPublishCheck(): CheckResult {
   if (pkg.private === true) return { findings };
 
   const hasFiles = Array.isArray(pkg.files) && (pkg.files as unknown[]).length > 0;
-  const hasNpmignore = existsSync(join(process.cwd(), ".npmignore"));
+  const hasNpmignore = existsSync(join(cwd, ".npmignore"));
 
   if (!hasFiles && !hasNpmignore) {
     findings.push({
@@ -46,7 +47,7 @@ export function runPublishCheck(): CheckResult {
     findings.push({
       severity: "low",
       tool: "npm",
-      file: join(process.cwd(), ".npmignore"),
+      file: join(cwd, ".npmignore"),
       rule: "npmignore-over-files-allowlist",
       message: `.npmignore denylist used instead of "files" allowlist. New files added to the repo are published by default unless explicitly ignored.`,
       fix: `Replace .npmignore with a "files" field in package.json for safer allowlist-style publish control.`,

@@ -3,9 +3,9 @@
  * Detects: plaintext tokens, overly permissive file modes, committed secrets.
  */
 import { join, dirname } from "path";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { HOME, readFile, fileExists, fileMode } from "../utils/fs.js";
-import type { CheckResult, Finding } from "../utils/types.js";
+import type { CheckContext, CheckResult, Finding } from "../utils/types.js";
 
 // Patterns that indicate a hardcoded secret
 const SECRET_PATTERNS: Array<{ name: string; regex: RegExp }> = [
@@ -54,7 +54,7 @@ function checkFilePermissions(path: string, findings: Finding[], tool: string): 
   }
 }
 
-function checkGitTracked(path: string, findings: Finding[], tool: string): void {
+function checkGitTracked(path: string, findings: Finding[], tool: string, cwd: string): void {
   if (!fileExists(path)) return;
   // Only flag if the file is git-tracked AND contains secrets.
   // A committed .npmrc with only policy settings (ignore-scripts etc.) is intentional.
@@ -66,7 +66,7 @@ function checkGitTracked(path: string, findings: Finding[], tool: string): void 
   });
   if (!hasSecret) return;
   try {
-    execSync(`git ls-files --error-unmatch "${path}" 2>/dev/null`, { stdio: "pipe" });
+    execFileSync("git", ["ls-files", "--error-unmatch", path], { stdio: "pipe", cwd });
     findings.push({
       severity: "critical",
       tool,
@@ -140,19 +140,21 @@ function checkTokenScope(path: string, findings: Finding[], tool: string): void 
   }
 }
 
-const CONFIG_FILES = [
-  { path: join(HOME, ".npmrc"), tool: "npm" },
-  { path: ".npmrc", tool: "npm" },
-  { path: join(HOME, ".pnpmrc"), tool: "pnpm" },
-  { path: ".pnpmrc", tool: "pnpm" },
-  { path: join(HOME, ".yarnrc"), tool: "yarn" },
-  { path: ".yarnrc", tool: "yarn" },
-  { path: join(HOME, ".yarnrc.yml"), tool: "yarn" },
-  { path: ".yarnrc.yml", tool: "yarn" },
-];
-
-export function runSecretsCheck(): CheckResult {
+export function runSecretsCheck(ctx: CheckContext = {}): CheckResult {
+  const home = ctx.home ?? HOME;
+  const cwd = ctx.cwd ?? process.cwd();
   const findings: Finding[] = [];
+
+  const CONFIG_FILES = [
+    { path: join(home, ".npmrc"), tool: "npm" },
+    { path: join(cwd, ".npmrc"), tool: "npm" },
+    { path: join(home, ".pnpmrc"), tool: "pnpm" },
+    { path: join(cwd, ".pnpmrc"), tool: "pnpm" },
+    { path: join(home, ".yarnrc"), tool: "yarn" },
+    { path: join(cwd, ".yarnrc"), tool: "yarn" },
+    { path: join(home, ".yarnrc.yml"), tool: "yarn" },
+    { path: join(cwd, ".yarnrc.yml"), tool: "yarn" },
+  ];
 
   for (const { path, tool } of CONFIG_FILES) {
     if (!fileExists(path)) continue;
@@ -161,8 +163,8 @@ export function runSecretsCheck(): CheckResult {
     checkEnvVarUsage(path, findings, tool);
     checkTokenScope(path, findings, tool);
     // Only check git tracking for project-level files (not home dir ones)
-    if (!path.startsWith(HOME)) {
-      checkGitTracked(path, findings, tool);
+    if (!path.startsWith(home)) {
+      checkGitTracked(path, findings, tool, cwd);
     }
   }
 

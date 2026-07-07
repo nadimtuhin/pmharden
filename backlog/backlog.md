@@ -15,11 +15,16 @@ Loop: plan → red→green → local-proof → critic → commit. Gate: `bash ba
 
 ## Decisions
 
-- **Testability seam (locked):** each `run*` check takes an optional opts object
-  (`{ home?: string }`, global-audit also `{ exec? }`), defaulting to real `homedir()`/`execFileSync`.
-  CLI-level smoke drives fixture homes via `HOME=<fixture> node dist/cli.js` in a subprocess
-  (os.homedir() reads $HOME at process start on POSIX) — no CLI flag needed, callers unchanged.
-  Rejected: mocking os.homedir() (module-load `HOME` const makes it fragile), in-process env swap (Bun caches).
+- **Testability seam (locked, amended by critic pass #1 — APPROVE-WITH-CHANGES):** all four `run*`
+  checks take one optional last-arg `CheckContext { home?: string; cwd?: string; exec?: (cmd, args) => string | null }`
+  (global-audit additionally folds `onProgress` into the same object — positional param on a
+  published API is a future breaking change). Defaults: real `homedir()` / `process.cwd()` /
+  `execFileSync`. `cwd` must cover config-audit's relative `.npmrc` and secrets' `git ls-files`
+  subprocess; secrets' `path.startsWith(HOME)` uses the injected home. Knobs documented test-only/unstable.
+  CLI smoke drives fixture homes via `HOME=<fixture>` subprocess env (POSIX-only, scoped to `audit` —
+  `all` still hits real npm/git subprocesses; global-audit is covered in-process via `exec` injection).
+  Rejected: mocking os.homedir() (module-load `HOME` const makes it fragile), in-process env swap
+  (Bun caches), DI container (YAGNI for 4 functions), settable config module (shared mutable state).
 - **Lockfile policy:** keep `package-lock.json` (CI installs with npm), drop unused `pnpm-lock.yaml`.
 - **Push policy:** commits stay local; push (incl. pre-existing bd986ba) only on explicit user confirmation.
 

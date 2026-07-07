@@ -15,3 +15,10 @@ export interface CheckResult {
   findings: Finding[];
   skipped?: string;
 }
+
+/** Test seam — unstable, not part of the public API contract. */
+export interface CheckContext {
+  home?: string;
+  cwd?: string;
+  exec?: (cmd: string, args: string[]) => string | null;
+}

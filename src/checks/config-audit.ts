@@ -4,7 +4,7 @@
  */
 import { join } from "path";
 import { HOME, readFile, fileExists, fileMode } from "../utils/fs.js";
-import type { CheckResult, Finding } from "../utils/types.js";
+import type { CheckContext, CheckResult, Finding } from "../utils/types.js";
 
 // ─── npm ───────────────────────────────────────────────────────────────────
 
@@ -58,7 +58,7 @@ function auditNpmrc(path: string, findings: Finding[]): void {
 
   // 3. allow-git too permissive
   const allowGit = cfg["allow-git"];
-  if (!allowGit || allowGit === "all") {
+  if (allowGit === "all") {
     findings.push({
       severity: "high",
       tool,
@@ -112,11 +112,11 @@ function auditNpmrc(path: string, findings: Finding[]): void {
 
 // ─── pnpm ──────────────────────────────────────────────────────────────────
 
-function auditPnpmrc(findings: Finding[]): void {
+function auditPnpmrc(findings: Finding[], home: string): void {
   // Prefer ~/.pnpmrc (pnpm-specific). Fall back to ~/.npmrc only if ~/.pnpmrc
   // doesn't exist — pnpm also reads .npmrc but we avoid double-reporting.
-  const dedicated = join(HOME, ".pnpmrc");
-  const fallback = join(HOME, ".npmrc");
+  const dedicated = join(home, ".pnpmrc");
+  const fallback = join(home, ".npmrc");
 
   const path = fileExists(dedicated) ? dedicated : fileExists(fallback) ? fallback : null;
 
@@ -190,9 +190,9 @@ function auditPnpmrc(findings: Finding[]): void {
 
 // ─── yarn ──────────────────────────────────────────────────────────────────
 
-function auditYarnrc(findings: Finding[]): void {
-  const v2path = join(HOME, ".yarnrc.yml");
-  const v1path = join(HOME, ".yarnrc");
+function auditYarnrc(findings: Finding[], home: string): void {
+  const v2path = join(home, ".yarnrc.yml");
+  const v1path = join(home, ".yarnrc");
 
   if (fileExists(v2path)) {
     const content = readFile(v2path)!;
@@ -233,8 +233,8 @@ function auditYarnrc(findings: Finding[]): void {
 
 // ─── bun ───────────────────────────────────────────────────────────────────
 
-function auditBunfig(findings: Finding[]): void {
-  const path = join(HOME, ".bunfig.toml");
+function auditBunfig(findings: Finding[], home: string): void {
+  const path = join(home, ".bunfig.toml");
   if (!fileExists(path)) {
     findings.push({
       severity: "info",
@@ -263,11 +263,13 @@ function auditBunfig(findings: Finding[]): void {
 
 // ─── Main export ───────────────────────────────────────────────────────────
 
-export function runConfigAudit(): CheckResult {
+export function runConfigAudit(ctx: CheckContext = {}): CheckResult {
+  const home = ctx.home ?? HOME;
+  const cwd = ctx.cwd ?? process.cwd();
   const findings: Finding[] = [];
 
   // npm: check both global and local .npmrc
-  const npmrcPaths = [join(HOME, ".npmrc"), ".npmrc"];
+  const npmrcPaths = [join(home, ".npmrc"), join(cwd, ".npmrc")];
   let foundNpmrc = false;
   for (const p of npmrcPaths) {
     if (fileExists(p)) {
@@ -286,9 +288,9 @@ export function runConfigAudit(): CheckResult {
     });
   }
 
-  auditPnpmrc(findings);
-  auditYarnrc(findings);
-  auditBunfig(findings);
+  auditPnpmrc(findings, home);
+  auditYarnrc(findings, home);
+  auditBunfig(findings, home);
 
   return { findings };
 }

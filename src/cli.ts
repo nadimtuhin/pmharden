@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from "fs";
 import { Command } from "commander";
 import { runConfigAudit } from "./checks/config-audit.js";
 import { runSecretsCheck } from "./checks/secrets.js";
@@ -8,12 +9,14 @@ import { renderFindings, renderSummary, renderJson } from "./reporter.js";
 import { Spinner } from "./utils/spinner.js";
 import type { Finding } from "./utils/types.js";
 
+const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+
 const program = new Command();
 
 program
   .name("pmharden")
   .description("Security hardening CLI for npm, pnpm, yarn, and bun")
-  .version("0.1.0");
+  .version(pkg.version);
 
 program
   .command("audit")
@@ -55,9 +58,15 @@ program
   .option("--json", "Output findings as JSON")
   .action(({ json }) => {
     const spin = json ? null : new Spinner("Fetching global package list…").start();
-    const result = runGlobalAudit(json ? undefined : (name, current, total) => {
-      spin!.update(`Checking ${name} (${current}/${total})…`);
-    });
+    const result = runGlobalAudit(
+      json
+        ? {}
+        : {
+            onProgress: (name, current, total) => {
+              spin!.update(`Checking ${name} (${current}/${total})…`);
+            },
+          }
+    );
     if (json) {
       renderJson(result.findings ?? []);
       process.exit((result.findings ?? []).some((f) => f.severity === "critical" || f.severity === "high") ? 1 : 0);
@@ -103,9 +112,15 @@ program
 
     // 3. Global audit
     const globalSpin = json ? null : new Spinner("Fetching global package list…").start();
-    const globalResult = runGlobalAudit(json ? undefined : (name, current, total) => {
-      globalSpin!.update(`Checking ${name} (${current}/${total})…`);
-    });
+    const globalResult = runGlobalAudit(
+      json
+        ? {}
+        : {
+            onProgress: (name, current, total) => {
+              globalSpin!.update(`Checking ${name} (${current}/${total})…`);
+            },
+          }
+    );
     if (!json) {
       if (globalResult.skipped) globalSpin!.succeed(globalResult.skipped);
       else if (globalResult.findings.length === 0) globalSpin!.succeed("Global packages look good");

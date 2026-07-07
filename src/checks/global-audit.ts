@@ -5,8 +5,8 @@
  * - Packages that are severely outdated (major versions behind)
  * - Packages with install scripts that weren't there before
  */
-import { execSync } from "child_process";
-import type { CheckResult, Finding } from "../utils/types.js";
+import { execFileSync } from "child_process";
+import type { CheckContext, CheckResult, Finding } from "../utils/types.js";
 
 // Known dangerous global packages (abandoned, known-compromised, or high-risk)
 const KNOWN_RISKY_GLOBALS: Record<string, { reason: string; fix: string }> = {
@@ -37,16 +37,18 @@ interface GlobalPackage {
   pm: string;
 }
 
-function runCommand(cmd: string): string | null {
+function defaultExec(cmd: string, args: string[]): string | null {
   try {
-    return execSync(cmd, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
+    return execFileSync(cmd, args, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
   } catch {
     return null;
   }
 }
 
-function getNpmGlobals(): GlobalPackage[] {
-  const out = runCommand("npm list -g --depth=0 --json 2>/dev/null");
+type Exec = (cmd: string, args: string[]) => string | null;
+
+function getNpmGlobals(exec: Exec): GlobalPackage[] {
+  const out = exec("npm", ["list", "-g", "--depth=0", "--json"]);
   if (!out) return [];
   try {
     const parsed = JSON.parse(out) as { dependencies?: Record<string, { version: string }> };
@@ -60,8 +62,8 @@ function getNpmGlobals(): GlobalPackage[] {
   }
 }
 
-function getPnpmGlobals(): GlobalPackage[] {
-  const out = runCommand("pnpm list -g --json 2>/dev/null");
+function getPnpmGlobals(exec: Exec): GlobalPackage[] {
+  const out = exec("pnpm", ["list", "-g", "--json"]);
   if (!out) return [];
   try {
     const parsed = JSON.parse(out) as Array<{ dependencies?: Record<string, { version: string }> }>;
@@ -76,8 +78,8 @@ function getPnpmGlobals(): GlobalPackage[] {
   }
 }
 
-function getYarnGlobals(): GlobalPackage[] {
-  const out = runCommand("yarn global list --json 2>/dev/null");
+function getYarnGlobals(exec: Exec): GlobalPackage[] {
+  const out = exec("yarn", ["global", "list", "--json"]);
   if (!out) return [];
   const pkgs: GlobalPackage[] = [];
   for (const line of out.split("\n")) {
@@ -97,8 +99,8 @@ function getYarnGlobals(): GlobalPackage[] {
   return pkgs;
 }
 
-function getLatestVersion(name: string): string | null {
-  const out = runCommand(`npm view "${name}" version 2>/dev/null`);
+function getLatestVersion(name: string, exec: Exec): string | null {
+  const out = exec("npm", ["view", name, "version"]);
   return out?.trim() ?? null;
 }
 
@@ -106,8 +108,8 @@ function parseMajor(version: string): number {
   return parseInt(version.replace(/^[^0-9]*/, "").split(".")[0] ?? "0", 10);
 }
 
-function checkInstallScripts(name: string, version: string): boolean {
-  const out = runCommand(`npm view "${name}@${version}" scripts --json 2>/dev/null`);
+function checkInstallScripts(name: string, version: string, exec: Exec): boolean {
+  const out = exec("npm", ["view", `${name}@${version}`, "scripts", "--json"]);
   if (!out) return false;
   try {
     const scripts = JSON.parse(out) as Record<string, string>;
@@ -118,14 +120,16 @@ function checkInstallScripts(name: string, version: string): boolean {
 }
 
 export function runGlobalAudit(
-  onProgress?: (name: string, current: number, total: number) => void
+  ctx: CheckContext & { onProgress?: (name: string, current: number, total: number) => void } = {}
 ): CheckResult {
+  const exec = ctx.exec ?? defaultExec;
+  const onProgress = ctx.onProgress;
   const findings: Finding[] = [];
 
   const allGlobals: GlobalPackage[] = [
-    ...getNpmGlobals(),
-    ...getPnpmGlobals(),
-    ...getYarnGlobals(),
+    ...getNpmGlobals(exec),
+    ...getPnpmGlobals(exec),
+    ...getYarnGlobals(exec),
   ];
 
   // Dedupe by name (keep first seen)
@@ -156,7 +160,7 @@ export function runGlobalAudit(
     }
 
     // 2. Check if severely outdated
-    const latest = getLatestVersion(pkg.name);
+    const latest = getLatestVersion(pkg.name, exec);
     if (latest) {
       const currentMajor = parseMajor(pkg.version);
       const latestMajor = parseMajor(latest);
@@ -180,7 +184,7 @@ export function runGlobalAudit(
     }
 
     // 3. Flag if package has install scripts (potential risk if compromised)
-    if (checkInstallScripts(pkg.name, pkg.version)) {
+    if (checkInstallScripts(pkg.name, pkg.version, exec)) {
       findings.push({
         severity: "low",
         tool: pkg.pm,
