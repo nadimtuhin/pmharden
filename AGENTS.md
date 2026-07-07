@@ -14,7 +14,7 @@ of misconfiguration that made ua-parser-js (2021), eslint-scope (2018), and
 node-ipc (CVE-2022-23812) possible.
 
 Three distinct checks:
-- `audit`   — lints .npmrc, .pnpmrc, .yarnrc.yml, bunfig.toml against a security baseline
+- `audit`   — lints .npmrc, pnpm-workspace.yaml, .yarnrc.yml, bunfig.toml against a security baseline
 - `secrets` — detects plaintext tokens and overly-permissive file modes
 - `global`  — audits globally installed packages for stale/risky installs
 
@@ -27,7 +27,7 @@ src/
   cli.ts                  # Commander.js entry point — subcommands defined here
   index.ts                # Barrel exports for programmatic use
   checks/
-    config-audit.ts       # .npmrc / .pnpmrc / .yarnrc / bunfig.toml linter
+    config-audit.ts       # .npmrc / pnpm-workspace.yaml / .yarnrc / bunfig.toml linter
     secrets.ts            # Token scanner + file permission checker
     global-audit.ts       # Global package auditor
   utils/
@@ -147,9 +147,11 @@ copy-pasteable command or config line. Not "update your config" — exact text.
 ## What Checks Already Exist (Avoid Duplicating)
 
 ### config-audit.ts
-- npm: ignore-scripts, audit=false, allow-git, minimum-release-age, unsafe-perm, custom registry
-- pnpm: strict-dep-builds, minimumReleaseAge, blockExoticSubdeps
-- yarn: v1 detection (no script control), enableScripts (v2+), minimumReleaseAge
+- npm: ignore-scripts, audit=false, allow-git, min-release-age, custom registry
+- pnpm (only checked when pnpm usage is detected — lockfile/config/packageManager field):
+  strictDepBuilds, minimumReleaseAge, blockExoticSubdeps, all in pnpm-workspace.yaml
+  (pnpm never reads ~/.pnpmrc)
+- yarn: v1 detection (no script control), enableScripts (v2+), npmMinimalAgeGate (v2+)
 - bun: registry pin check
 
 ### secrets.ts
@@ -218,7 +220,7 @@ This repo follows its own advice:
 ```
 ignore-scripts=true     # set in ~/.npmrc
 allow-git=none          # set in ~/.npmrc  (or: set it)
-minimum-release-age=7   # set in ~/.npmrc  (or: set it)
+min-release-age=7       # set in ~/.npmrc  (or: set it)
 ```
 
 If you're adding a dependency, verify it's not newly published (< 7 days) and

@@ -32,7 +32,7 @@ I ran this on my own machine and found a plaintext npm token in `~/.npmrc`. It h
 Three checks, one command:
 
 ```
-pmharden audit    — config linter (.npmrc, .pnpmrc, .yarnrc.yml, bunfig.toml)
+pmharden audit    — config linter (.npmrc, pnpm-workspace.yaml, .yarnrc.yml, bunfig.toml)
 pmharden secrets  — plaintext tokens, file permissions
 pmharden global   — stale or risky globally installed packages
 pmharden          — all three
@@ -113,7 +113,7 @@ Malicious packages often get reported and pulled within days. If you install the
 | [LofyGang](https://www.reversinglabs.com/blog/lofygang-disrupting-open-source-ecosystem) | 2022 | 200+ packages, exfiltrated Discord tokens |
 | [Mastra `easy-day-js`](https://socket.dev/blog/mastra-npm-packages-compromised) | 2026 | Typosquat published clean, then updated the next day to deliver malware — same pattern as the axios campaign. Socket flagged it 6 minutes after publication. |
 
-`pmharden audit` checks that `minimum-release-age=7 days` is set — blocks packages published in the last 7 days.
+`pmharden audit` checks that `min-release-age=7` is set — blocks packages published in the last 7 days.
 
 ### plaintext tokens
 
@@ -139,24 +139,30 @@ Attackers have started embedding fake prompt-injection headers and safety-trigge
 |---------|------|----------|
 | `ignore-scripts` not `true` | Allows postinstall execution | HIGH |
 | `allow-git=all` | Installs from unreviewed git commits | HIGH |
-| No `minimum-release-age` | Zero-day window open | MEDIUM |
-| `unsafe-perm=true` | Scripts run as root | HIGH |
+| No `min-release-age` | Zero-day window open | MEDIUM |
 | `audit=false` | Disables built-in CVE checks | MEDIUM |
 
 ### pnpm
 
-| Setting | Risk | Severity |
-|---------|------|----------|
-| `strict-dep-builds` not set | Build scripts run without review | HIGH |
-| No `minimumReleaseAge` | Zero-day window open | MEDIUM |
-| `blockExoticSubdeps` not set | Non-registry sub-dependencies allowed | MEDIUM |
+Only checked when pnpm usage is detected (a `pnpm-lock.yaml`, workspace/global config,
+or a `packageManager: "pnpm@..."` field) — otherwise skipped, not silently assumed clean.
+
+| Setting | Where | Risk | Severity |
+|---------|-------|------|----------|
+| `strictDepBuilds` not set | `pnpm-workspace.yaml` | Build scripts run without review | HIGH |
+| No `minimumReleaseAge` | `pnpm-workspace.yaml` | Zero-day window open | MEDIUM |
+| `blockExoticSubdeps: false` | `pnpm-workspace.yaml` | Non-registry sub-dependencies allowed | MEDIUM |
+
+pnpm never reads `~/.pnpmrc` — it isn't a file pnpm consults at all. Settings live in
+`pnpm-workspace.yaml` (project) or `~/.config/pnpm/config.yaml` (global).
 
 ### yarn
 
 | Setting | Risk | Severity |
 |---------|------|----------|
 | yarn v1 (classic) | No config-level script blocking — architectural gap | HIGH |
-| `enableScripts: false` missing (v2+) | Allows postinstall execution | HIGH |
+| `enableScripts: false` missing (v2+) | Allows postinstall execution | LOW |
+| No `npmMinimalAgeGate` (v2+) | Zero-day window open | LOW |
 
 yarn v1 has no `ignore-scripts` equivalent that works via `.yarnrc`. See [yarnpkg/yarn#5335](https://github.com/yarnpkg/yarn/issues/5335). Every attack in the table above hit yarn v1 users with no mitigation available.
 
