@@ -1,6 +1,6 @@
 /**
  * Package manager config linter.
- * Checks: .npmrc, .pnpmrc / pnpm-workspace.yaml, .yarnrc.yml, bunfig.toml
+ * Checks: .npmrc, pnpm-workspace.yaml / ~/.config/pnpm/config.yaml, .yarnrc.yml, bunfig.toml
  */
 import { join } from "path";
 import { HOME, readFile, fileExists, fileMode } from "../utils/fs.js";
@@ -50,13 +50,13 @@ function auditNpmrc(path: string, findings: Finding[]): void {
       tool,
       file,
       rule: "audit-disabled",
-      message: `audit=false disables vulnerability scanning on every install.`,
+      message: `audit=false disables the automatic vulnerability report shown on install. It does not affect running "npm audit" manually.`,
       fix: `Remove audit=false from ${path}`,
       agentPrompt: `Open ${path} and remove the line "audit=false". Do not change any other lines.`,
     });
   }
 
-  // 3. allow-git too permissive
+  // 3. allow-git too permissive, or left at its permissive default
   const allowGit = cfg["allow-git"];
   if (allowGit === "all") {
     findings.push({
@@ -68,18 +68,15 @@ function auditNpmrc(path: string, findings: Finding[]): void {
       fix: `npm config set allow-git=none  (or restrict to specific organizations)`,
       agentPrompt: `Open ${path} and set "allow-git=none". If the line does not exist, add it. If it says "allow-git=all", change it to "allow-git=none". Do not change any other lines.`,
     });
-  }
-
-  // 5. unsafe-perm
-  if (cfg["unsafe-perm"] === "true") {
+  } else if (allowGit === undefined) {
     findings.push({
-      severity: "high",
+      severity: "medium",
       tool,
       file,
-      rule: "unsafe-perm",
-      message: `unsafe-perm=true runs install scripts with elevated privileges. Removes sandboxing.`,
-      fix: `Remove unsafe-perm=true from ${path}`,
-      agentPrompt: `Open ${path} and remove the line "unsafe-perm=true". Do not change any other lines.`,
+      rule: "allow-git-unset",
+      message: `allow-git is unset. npm's current default permits installing packages directly from git (including unreviewed commits) — supply-chain risk.`,
+      fix: `npm config set allow-git=none  (or restrict to specific organizations)`,
+      agentPrompt: `Open ${path} and add the line "allow-git=none" if it is not already present. Do not change any other lines.`,
     });
   }
 
@@ -111,79 +108,67 @@ function auditNpmrc(path: string, findings: Finding[]): void {
 }
 
 // ─── pnpm ──────────────────────────────────────────────────────────────────
+// pnpm never reads ~/.pnpmrc. It reads pnpm-workspace.yaml (project, pnpm >=
+// 11 canonical), ~/.config/pnpm/config.yaml (global, pnpm >= 11, XDG default),
+// and the project .npmrc (pnpm 10.x kebab-case keys).
 
-function auditPnpmrc(findings: Finding[], home: string): void {
-  // Prefer ~/.pnpmrc (pnpm-specific). Fall back to ~/.npmrc only if ~/.pnpmrc
-  // doesn't exist — pnpm also reads .npmrc but we avoid double-reporting.
-  const dedicated = join(home, ".pnpmrc");
-  const fallback = join(home, ".npmrc");
+function auditPnpm(findings: Finding[], home: string, cwd: string): void {
+  const workspaceYaml = join(cwd, "pnpm-workspace.yaml");
+  const globalYaml = join(home, ".config", "pnpm", "config.yaml");
+  const projectNpmrc = join(cwd, ".npmrc");
 
-  const path = fileExists(dedicated) ? dedicated : fileExists(fallback) ? fallback : null;
+  const hasWorkspace = fileExists(workspaceYaml);
+  const hasGlobal = fileExists(globalYaml);
 
-  if (!path) {
+  if (!hasWorkspace && !hasGlobal) {
     findings.push({
       severity: "info",
       tool: "pnpm",
-      rule: "no-pnpmrc",
-      message: `No pnpm config found. Consider setting strictDepBuilds=true and minimumReleaseAge.`,
-      fix: `Create ~/.pnpmrc with:\nstrict-dep-builds=true\nminimum-release-age=7`,
-      agentPrompt: `Create the file ~/.pnpmrc with these contents:\nstrict-dep-builds=true\nminimum-release-age=7\nblock-exotic-subdeps=true`,
+      rule: "no-pnpm-config",
+      message: `No pnpm config found (only relevant if you use pnpm).`,
+      fix: `Add to pnpm-workspace.yaml:\nstrictDepBuilds: true\nminimumReleaseAge: 10080`,
+      agentPrompt: `Create or edit pnpm-workspace.yaml at the project root and add:\nstrictDepBuilds: true\nminimumReleaseAge: 10080\nDo not change any other lines.`,
     });
-    return;
   }
 
-  const content = readFile(path);
-  if (!content) return;
+  const sources = [workspaceYaml, globalYaml, projectNpmrc].filter((p) => fileExists(p));
+  const combined = sources.map((p) => readFile(p) ?? "").join("\n");
+  const primarySource = hasWorkspace ? workspaceYaml : sources[0];
+  const fileField = primarySource ? { file: primarySource } : {};
 
-  // strictDepBuilds / strict-dep-builds
-  if (!content.includes("strict-dep-builds") && !content.includes("strictDepBuilds")) {
+  if (!combined.includes("strictDepBuilds") && !combined.includes("strict-dep-builds")) {
     findings.push({
       severity: "high",
       tool: "pnpm",
-      file: path,
+      ...fileField,
       rule: "no-strict-dep-builds",
-      message: `strict-dep-builds not set. pnpm will silently run dependency build scripts without review.`,
-      fix: `Add to ${path}:\nstrict-dep-builds=true`,
-      agentPrompt: `Open ${path} and add the line "strict-dep-builds=true" if it is not already present. Do not change any other lines.`,
+      message: `strictDepBuilds not set. pnpm will silently run dependency build scripts without review.`,
+      fix: `Add to pnpm-workspace.yaml:\nstrictDepBuilds: true\n(pnpm >= 10.3; on pnpm 10.x you can alternatively add strict-dep-builds=true to the project .npmrc)`,
+      agentPrompt: `Open pnpm-workspace.yaml and add the line "strictDepBuilds: true" if it is not already present. On pnpm 10.x, "strict-dep-builds=true" in the project .npmrc also works. Do not change any other lines.`,
     });
   }
 
-  // minimumReleaseAge
-  if (!content.includes("minimum-release-age") && !content.includes("minimumReleaseAge")) {
+  if (!combined.includes("minimumReleaseAge") && !combined.includes("minimum-release-age")) {
     findings.push({
       severity: "medium",
       tool: "pnpm",
-      file: path,
+      ...fileField,
       rule: "no-minimum-release-age",
       message: `minimumReleaseAge not set. Fresh packages (<7 days) are a top supply-chain risk.`,
-      fix: `Add to ${path}:\nminimum-release-age=7`,
-      agentPrompt: `Open ${path} and add the line "minimum-release-age=7" if it is not already present. Do not change any other lines.`,
+      fix: `Add to pnpm-workspace.yaml:\nminimumReleaseAge: 10080   (value is minutes; pnpm >= 10.16)`,
+      agentPrompt: `Open pnpm-workspace.yaml and add the line "minimumReleaseAge: 10080" (value is minutes, 10080 = 7 days) if it is not already present. Do not change any other lines.`,
     });
   }
 
-  // blockExoticSubdeps
-  if (!content.includes("block-exotic-subdeps") && !content.includes("blockExoticSubdeps")) {
+  if (combined.includes("blockExoticSubdeps: false")) {
     findings.push({
       severity: "medium",
       tool: "pnpm",
-      file: path,
-      rule: "no-block-exotic-subdeps",
-      message: `block-exotic-subdeps not set. Git and tarball transitive deps can bypass registry vetting.`,
-      fix: `Add to ${path}:\nblock-exotic-subdeps=true`,
-      agentPrompt: `Open ${path} and add the line "block-exotic-subdeps=true" if it is not already present. Do not change any other lines.`,
-    });
-  }
-
-  // onlyBuiltDependencies (pnpm 9+) — allowlist for packages permitted to run build scripts
-  if (!content.includes("only-built-dependencies") && !content.includes("onlyBuiltDependencies")) {
-    findings.push({
-      severity: "medium",
-      tool: "pnpm",
-      file: path,
-      rule: "no-only-built-dependencies",
-      message: `onlyBuiltDependencies not set (pnpm 9+). Without an allowlist, any dep can run build scripts even with strict-dep-builds=true on fresh installs.`,
-      fix: `Add to ${path}:\nonly-built-dependencies[]=esbuild\nonly-built-dependencies[]=@swc/core\n# list every package you explicitly trust to run postinstall`,
-      agentPrompt: `Open ${path} and add an onlyBuiltDependencies allowlist. Start with only the packages in the current project that genuinely need build scripts (e.g. esbuild, @swc/core, canvas). Add lines like:\nonly-built-dependencies[]=esbuild\nDo not add packages speculatively. Do not change any other lines.`,
+      ...fileField,
+      rule: "block-exotic-subdeps-disabled",
+      message: `blockExoticSubdeps is explicitly set to false. pnpm >= 11 defaults this to true; disabling it re-opens git/tarball transitive dependencies that bypass registry vetting.`,
+      fix: `Remove "blockExoticSubdeps: false" from pnpm-workspace.yaml, or change it to true.`,
+      agentPrompt: `Open pnpm-workspace.yaml and remove the line "blockExoticSubdeps: false" (or change it to "blockExoticSubdeps: true"). Do not change any other lines.`,
     });
   }
 }
@@ -198,24 +183,24 @@ function auditYarnrc(findings: Finding[], home: string): void {
     const content = readFile(v2path)!;
     if (!content.includes("enableScripts: false")) {
       findings.push({
-        severity: "critical",
+        severity: "low",
         tool: "yarn",
         file: v2path,
         rule: "enable-scripts-missing",
-        message: `enableScripts: false not set in .yarnrc.yml. Yarn Berry runs lifecycle scripts by default.`,
+        message: `enableScripts: false not set in .yarnrc.yml. Current Yarn Berry defaults enableScripts to false, but older Berry versions ran scripts by default — set it explicitly to be safe on any version.`,
         fix: `Add to ${v2path}:\nenableScripts: false`,
         agentPrompt: `Open ${v2path} and add the line "enableScripts: false" at the top level if it is not already present. This is a YAML file — preserve indentation of existing lines. Do not change any other lines.`,
       });
     }
-    if (!content.includes("minimumReleaseAge")) {
+    if (!content.includes("npmMinimalAgeGate")) {
       findings.push({
-        severity: "medium",
+        severity: "low",
         tool: "yarn",
         file: v2path,
-        rule: "no-minimum-release-age",
-        message: `minimumReleaseAge not set in .yarnrc.yml.`,
-        fix: `Add to ${v2path}:\nminimumReleaseAge: "7 days"`,
-        agentPrompt: `Open ${v2path} and add the line 'minimumReleaseAge: "7 days"' at the top level if it is not already present. This is a YAML file — preserve indentation. Do not change any other lines.`,
+        rule: "no-npm-minimal-age-gate",
+        message: `npmMinimalAgeGate not set in .yarnrc.yml. Yarn gates fresh packages by default (npmMinimalAgeGate: "1w"), but pinning it explicitly avoids relying on the default.`,
+        fix: `Add to ${v2path}:\nnpmMinimalAgeGate: 10080`,
+        agentPrompt: `Open ${v2path} and add the line "npmMinimalAgeGate: 10080" (a plain number of minutes, not a day-suffix string like "7d" — Yarn has a known bug silently ignoring day-suffix duration strings, yarnpkg/berry#6899) at the top level if it is not already present. Do not change any other lines.`,
       });
     }
   } else if (fileExists(v1path)) {
@@ -283,12 +268,12 @@ export function runConfigAudit(ctx: CheckContext = {}): CheckResult {
       tool: "npm",
       rule: "no-npmrc",
       message: `No .npmrc found. npm runs with insecure defaults (scripts enabled, no release age gate).`,
-      fix: `Create ~/.npmrc with:\nignore-scripts=true\nminimum-release-age=7 days\naudit=true`,
-      agentPrompt: `Create the file ~/.npmrc with these contents:\nignore-scripts=true\nminimum-release-age=7 days\naudit=true\nallow-git=none`,
+      fix: `Create ~/.npmrc with:\nignore-scripts=true\nmin-release-age=7\naudit=true`,
+      agentPrompt: `Create the file ~/.npmrc with these contents:\nignore-scripts=true\nmin-release-age=7\naudit=true\nallow-git=none`,
     });
   }
 
-  auditPnpmrc(findings, home);
+  auditPnpm(findings, home, cwd);
   auditYarnrc(findings, home);
   auditBunfig(findings, home);
 

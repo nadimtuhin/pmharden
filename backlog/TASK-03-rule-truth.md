@@ -54,11 +54,55 @@ yarn .yarnrc.yml without npmMinimalAgeGate → low finding naming npmMinimalAgeG
 </tdd>
 
 <dod>
-- [ ] every changed rule has a red-first test
-- [ ] no fix/agentPrompt text recommends a key/location the docs don't support
-- [ ] gate green (fast + --full)
+- [x] every changed rule has a red-first test
+- [x] no fix/agentPrompt text recommends a key/location the docs don't support
+- [ ] gate green (fast + --full) — not run here (concurrent agents editing other files); scoped `bun test test/config-audit.test.ts` is green
 </dod>
 
 <changelog>
-(filled by executor)
+Files touched: src/checks/config-audit.ts, test/config-audit.test.ts.
+
+Changes:
+- npm: deleted the unsafe-perm rule (no-op since npm 7). allow-git absent now fires a new
+  medium `allow-git-unset` finding with an honest message (no "set to all" claim); `=all`
+  still fires `allow-git-all` (high); `=none`/`=root` fire neither. audit-disabled message
+  softened to describe the install-time report only. no-npmrc fix/agentPrompt now recommend
+  `min-release-age=7` instead of `minimum-release-age=7 days`.
+- pnpm: `auditPnpmrc` (which only ever read the non-existent ~/.pnpmrc, falling back to
+  ~/.npmrc) replaced with `auditPnpm(findings, home, cwd)`, which checks
+  cwd/pnpm-workspace.yaml, home/.config/pnpm/config.yaml, and cwd/.npmrc — concatenated into
+  `combined` for key detection. New/changed rules: `no-pnpm-config` (info, neither yaml
+  source exists), `no-strict-dep-builds` (high), `no-minimum-release-age` (medium),
+  `block-exotic-subdeps-disabled` (medium, only fires if `blockExoticSubdeps: false` is
+  explicit — absent is safe on pnpm >=11 default). Deleted `no-block-exotic-subdeps` and
+  `no-only-built-dependencies` (recommended INI syntax never existed).
+- yarn: `enable-scripts-missing` severity critical -> low, message corrected (current Berry
+  defaults enableScripts to false; older Berry versions did not). Renamed the release-age
+  rule to `no-npm-minimal-age-gate`, checking `npmMinimalAgeGate` (yarn's real key, not
+  pnpm's `minimumReleaseAge`), severity low, recommending a plain minutes integer
+  (yarnpkg/berry#6899 day-suffix parsing bug).
+- bun: unchanged.
+
+Red evidence (bun test test/config-audit.test.ts, before source changes — 6 failing):
+  - bad-home ... unsafe-perm: expected undefined, received "high"
+  - allow-git-unset: expected defined, received undefined
+  - no-npmrc fix text: expected to contain "min-release-age=7", received
+    "...minimum-release-age=7 days..."
+  - pnpm empty home+cwd: expected no-pnpm-config/no-strict-dep-builds/no-minimum-release-age
+    to fire, none did (old code only reads ~/.pnpmrc or ~/.npmrc fallback)
+  - blockExoticSubdeps: false in pnpm-workspace.yaml: expected block-exotic-subdeps-disabled,
+    old code never reads cwd, so it never fired
+  - yarn enable-scripts-missing: expected severity "low", received "critical"
+  8 pass / 6 fail / 29 expect() calls, 14 tests.
+
+Green evidence (bun test test/config-audit.test.ts, after source changes):
+  bun test v1.3.14 (0d9b296a)
+   14 pass
+   0 fail
+   40 expect() calls
+  Ran 14 tests across 1 file. [135.00ms]
+
+Deviations: none from the locked decisions. `npx tsc --noEmit` shows no errors for
+config-audit.ts or config-audit.test.ts (grepped for "config-audit" in output; other
+in-flight files from concurrent agents were not evaluated, per task scope).
 </changelog>
