@@ -183,7 +183,7 @@ export function runGlobalAudit(
           tool: pkg.pm,
           rule: "severely-outdated-global",
           message: `${pkg.name}@${pkg.version} is ${latestMajor - currentMajor} major versions behind (latest: ${latest}). Old versions often have unpatched CVEs.`,
-          fix: `npm install -g ${pkg.name}@latest`,
+          fix: pkg.pm === "pnpm" ? `pnpm add -g ${pkg.name}@latest` : pkg.pm === "yarn" ? `yarn global add ${pkg.name}@latest` : `npm install -g ${pkg.name}@latest`,
         });
       } else if (pkg.version !== latest && latestMajor > currentMajor) {
         findings.push({
@@ -191,7 +191,7 @@ export function runGlobalAudit(
           tool: pkg.pm,
           rule: "outdated-global",
           message: `${pkg.name}@${pkg.version} outdated (latest: ${latest}).`,
-          fix: `npm install -g ${pkg.name}@latest`,
+          fix: pkg.pm === "pnpm" ? `pnpm add -g ${pkg.name}@latest` : pkg.pm === "yarn" ? `yarn global add ${pkg.name}@latest` : `npm install -g ${pkg.name}@latest`,
         });
       }
     }
