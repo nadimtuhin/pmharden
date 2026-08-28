@@ -9,8 +9,8 @@ import type { CheckContext, CheckResult, Finding } from "../utils/types.js";
 
 // Patterns that indicate a hardcoded secret
 const SECRET_PATTERNS: Array<{ name: string; regex: RegExp }> = [
-  { name: "npm-token", regex: /\/\/[^:]+:_authToken=(npm_[A-Za-z0-9_]{10,})/g },
-  { name: "npm-token-generic", regex: /\/\/[^:]+:_authToken=(?!\$\{)[^$\s]{10,}/g },
+  { name: "npm-token", regex: /\/\/.+?:_authToken=(npm_[A-Za-z0-9_]{10,})/g },
+  { name: "npm-token-generic", regex: /\/\/.+?:_authToken=(?!\$\{)[^$\s]{10,}/g },
   { name: "npm-password", regex: /_password=(?!\$\{)[^$\s]{6,}/g },
   { name: "npm-email-leak", regex: /email=[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g },
   { name: "generic-secret", regex: /(?:secret|password|passwd|token|apikey|api_key)\s*=\s*(?!\$\{)[^\s]{6,}/gi },
