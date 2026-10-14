@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Breaking for library callers:** `runGlobalAudit` is now async and returns `Promise<CheckResult>`; `await` it. The `exec` test seam may return a Promise. Global audit now runs `npm view` lookups 4 at a time.
+
 ### Added
 - `--json` flag on all subcommands for machine-readable CI output
 - `pmharden all` now includes publish safety check
