@@ -20,5 +20,5 @@ export interface CheckResult {
 export interface CheckContext {
   home?: string;
   cwd?: string;
-  exec?: (cmd: string, args: string[]) => string | null;
+  exec?: (cmd: string, args: string[]) => string | null | Promise<string | null>;
 }

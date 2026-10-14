@@ -137,7 +137,7 @@ Attackers have started embedding fake prompt-injection headers and safety-trigge
 
 | Setting | Risk | Severity |
 |---------|------|----------|
-| `ignore-scripts` not `true` | Allows postinstall execution | HIGH |
+| `ignore-scripts` not `true` | Allows postinstall execution | CRITICAL |
 | `allow-git=all` | Installs from unreviewed git commits | HIGH |
 | No `min-release-age` | Zero-day window open | MEDIUM |
 | `audit=false` | Disables built-in CVE checks | MEDIUM |

@@ -5,7 +5,7 @@
  * - Packages that are severely outdated (major versions behind)
  * - Packages with install scripts that weren't there before
  */
-import { execFileSync } from "child_process";
+import { execFile } from "child_process";
 import type { CheckContext, CheckResult, Finding } from "../utils/types.js";
 
 // Known dangerous global packages (abandoned, known-compromised, or high-risk)
@@ -37,18 +37,35 @@ interface GlobalPackage {
   pm: string;
 }
 
-function defaultExec(cmd: string, args: string[]): string | null {
-  try {
-    return execFileSync(cmd, args, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
-  } catch {
-    return null;
-  }
+const NPM_VIEW_CONCURRENCY = 4;
+
+function defaultExec(cmd: string, args: string[]): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile(cmd, args, { encoding: "utf8" }, (err, stdout) => resolve(err ? null : stdout));
+  });
 }
 
-type Exec = (cmd: string, args: string[]) => string | null;
+type Exec = NonNullable<CheckContext["exec"]>;
 
-function getNpmGlobals(exec: Exec): GlobalPackage[] | null {
-  const out = exec("npm", ["list", "-g", "--depth=0", "--json"]);
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]!, i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+async function getNpmGlobals(exec: Exec): Promise<GlobalPackage[] | null> {
+  const out = await exec("npm", ["list", "-g", "--depth=0", "--json"]);
   if (!out) return null;
   try {
     const parsed = JSON.parse(out) as { dependencies?: Record<string, { version: string }> };
@@ -62,8 +79,8 @@ function getNpmGlobals(exec: Exec): GlobalPackage[] | null {
   }
 }
 
-function getPnpmGlobals(exec: Exec): GlobalPackage[] | null {
-  const out = exec("pnpm", ["list", "-g", "--json"]);
+async function getPnpmGlobals(exec: Exec): Promise<GlobalPackage[] | null> {
+  const out = await exec("pnpm", ["list", "-g", "--json"]);
   if (!out) return null;
   try {
     const parsed = JSON.parse(out) as Array<{ dependencies?: Record<string, { version: string }> }>;
@@ -78,8 +95,8 @@ function getPnpmGlobals(exec: Exec): GlobalPackage[] | null {
   }
 }
 
-function getYarnGlobals(exec: Exec): GlobalPackage[] | null {
-  const out = exec("yarn", ["global", "list", "--json"]);
+async function getYarnGlobals(exec: Exec): Promise<GlobalPackage[] | null> {
+  const out = await exec("yarn", ["global", "list", "--json"]);
   if (!out) return null;
   const pkgs: GlobalPackage[] = [];
   for (const line of out.split("\n")) {
@@ -99,8 +116,8 @@ function getYarnGlobals(exec: Exec): GlobalPackage[] | null {
   return pkgs;
 }
 
-function getLatestVersion(name: string, exec: Exec): string | null {
-  const out = exec("npm", ["view", name, "version"]);
+async function getLatestVersion(name: string, exec: Exec): Promise<string | null> {
+  const out = await exec("npm", ["view", name, "version"]);
   return out?.trim() ?? null;
 }
 
@@ -108,8 +125,8 @@ function parseMajor(version: string): number {
   return parseInt(version.replace(/^[^0-9]*/, "").split(".")[0] ?? "0", 10);
 }
 
-function checkInstallScripts(name: string, version: string, exec: Exec): boolean {
-  const out = exec("npm", ["view", `${name}@${version}`, "scripts", "--json"]);
+async function checkInstallScripts(name: string, version: string, exec: Exec): Promise<boolean> {
+  const out = await exec("npm", ["view", `${name}@${version}`, "scripts", "--json"]);
   if (!out) return false;
   try {
     const scripts = JSON.parse(out) as Record<string, string>;
@@ -119,16 +136,16 @@ function checkInstallScripts(name: string, version: string, exec: Exec): boolean
   }
 }
 
-export function runGlobalAudit(
+export async function runGlobalAudit(
   ctx: CheckContext & { onProgress?: (name: string, current: number, total: number) => void } = {}
-): CheckResult {
+): Promise<CheckResult> {
   const exec = ctx.exec ?? defaultExec;
   const onProgress = ctx.onProgress;
   const findings: Finding[] = [];
 
-  const npmResult = getNpmGlobals(exec);
-  const pnpmResult = getPnpmGlobals(exec);
-  const yarnResult = getYarnGlobals(exec);
+  const npmResult = await getNpmGlobals(exec);
+  const pnpmResult = await getPnpmGlobals(exec);
+  const yarnResult = await getYarnGlobals(exec);
 
   if (npmResult === null && pnpmResult === null && yarnResult === null) {
     return { findings, skipped: "npm/pnpm/yarn list commands failed — global packages were NOT audited" };
@@ -157,56 +174,62 @@ export function runGlobalAudit(
     return { findings, skipped: "No global packages found" };
   }
 
-  for (let i = 0; i < deduped.length; i++) {
-    const pkg = deduped[i]!;
+  const perPackage = await mapWithConcurrency(deduped, NPM_VIEW_CONCURRENCY, async (pkg, i) => {
     onProgress?.(pkg.name, i + 1, deduped.length);
-    // 1. Known risky globals
-    if (KNOWN_RISKY_GLOBALS[pkg.name]) {
-      const risk = KNOWN_RISKY_GLOBALS[pkg.name]!;
+    return auditPackage(pkg, exec);
+  });
+
+  return { findings: perPackage.flat(), ...(failureNotes.length ? { skipped: failureNotes.join("; ") } : {}) };
+}
+
+async function auditPackage(pkg: GlobalPackage, exec: Exec): Promise<Finding[]> {
+  const findings: Finding[] = [];
+  // 1. Known risky globals
+  if (KNOWN_RISKY_GLOBALS[pkg.name]) {
+    const risk = KNOWN_RISKY_GLOBALS[pkg.name]!;
+    findings.push({
+      severity: "high",
+      tool: pkg.pm,
+      rule: "known-risky-global",
+      message: `${pkg.name}@${pkg.version} (global): ${risk.reason}`,
+      fix: risk.fix,
+    });
+  }
+
+  // 2. Check if severely outdated
+  const latest = await getLatestVersion(pkg.name, exec);
+  if (latest) {
+    const currentMajor = parseMajor(pkg.version);
+    const latestMajor = parseMajor(latest);
+    if (latestMajor - currentMajor >= STALE_MAJOR_THRESHOLD) {
       findings.push({
         severity: "high",
         tool: pkg.pm,
-        rule: "known-risky-global",
-        message: `${pkg.name}@${pkg.version} (global): ${risk.reason}`,
-        fix: risk.fix,
+        rule: "severely-outdated-global",
+        message: `${pkg.name}@${pkg.version} is ${latestMajor - currentMajor} major versions behind (latest: ${latest}). Old versions often have unpatched CVEs.`,
+        fix: pkg.pm === "pnpm" ? `pnpm add -g ${pkg.name}@latest` : pkg.pm === "yarn" ? `yarn global add ${pkg.name}@latest` : `npm install -g ${pkg.name}@latest`,
       });
-    }
-
-    // 2. Check if severely outdated
-    const latest = getLatestVersion(pkg.name, exec);
-    if (latest) {
-      const currentMajor = parseMajor(pkg.version);
-      const latestMajor = parseMajor(latest);
-      if (latestMajor - currentMajor >= STALE_MAJOR_THRESHOLD) {
-        findings.push({
-          severity: "high",
-          tool: pkg.pm,
-          rule: "severely-outdated-global",
-          message: `${pkg.name}@${pkg.version} is ${latestMajor - currentMajor} major versions behind (latest: ${latest}). Old versions often have unpatched CVEs.`,
-          fix: pkg.pm === "pnpm" ? `pnpm add -g ${pkg.name}@latest` : pkg.pm === "yarn" ? `yarn global add ${pkg.name}@latest` : `npm install -g ${pkg.name}@latest`,
-        });
-      } else if (pkg.version !== latest && latestMajor > currentMajor) {
-        findings.push({
-          severity: "medium",
-          tool: pkg.pm,
-          rule: "outdated-global",
-          message: `${pkg.name}@${pkg.version} outdated (latest: ${latest}).`,
-          fix: pkg.pm === "pnpm" ? `pnpm add -g ${pkg.name}@latest` : pkg.pm === "yarn" ? `yarn global add ${pkg.name}@latest` : `npm install -g ${pkg.name}@latest`,
-        });
-      }
-    }
-
-    // 3. Flag if package has install scripts (potential risk if compromised)
-    if (checkInstallScripts(pkg.name, pkg.version, exec)) {
+    } else if (pkg.version !== latest && latestMajor > currentMajor) {
       findings.push({
-        severity: "low",
+        severity: "medium",
         tool: pkg.pm,
-        rule: "global-with-install-scripts",
-        message: `${pkg.name}@${pkg.version} runs lifecycle scripts (pre/post/install). If this package is ever compromised, scripts execute with your user permissions.`,
-        fix: `Review if ${pkg.name} truly needs to be installed globally vs used via npx`,
+        rule: "outdated-global",
+        message: `${pkg.name}@${pkg.version} outdated (latest: ${latest}).`,
+        fix: pkg.pm === "pnpm" ? `pnpm add -g ${pkg.name}@latest` : pkg.pm === "yarn" ? `yarn global add ${pkg.name}@latest` : `npm install -g ${pkg.name}@latest`,
       });
     }
   }
 
-  return { findings, ...(failureNotes.length ? { skipped: failureNotes.join("; ") } : {}) };
+  // 3. Flag if package has install scripts (potential risk if compromised)
+  if (await checkInstallScripts(pkg.name, pkg.version, exec)) {
+    findings.push({
+      severity: "low",
+      tool: pkg.pm,
+      rule: "global-with-install-scripts",
+      message: `${pkg.name}@${pkg.version} runs lifecycle scripts (pre/post/install). If this package is ever compromised, scripts execute with your user permissions.`,
+      fix: `Review if ${pkg.name} truly needs to be installed globally vs used via npx`,
+    });
+  }
+
+  return findings;
 }

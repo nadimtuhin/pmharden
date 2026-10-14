@@ -38,14 +38,14 @@ function makeFakeExec(config: ExecConfig) {
 }
 
 describe("global-audit known-risky-global", () => {
-  it("flags create-react-app by name", () => {
+  it("flags create-react-app by name", async () => {
     const { exec } = makeFakeExec({
       npmList: JSON.stringify({ dependencies: { "create-react-app": { version: "5.0.1" } } }),
       latestVersions: { "create-react-app": "5.0.1" },
       scripts: {},
     });
 
-    const result = runGlobalAudit({ exec });
+    const result = await runGlobalAudit({ exec });
 
     const finding = result.findings.find((f) => f.rule === "known-risky-global");
     expect(finding).toBeDefined();
@@ -55,14 +55,14 @@ describe("global-audit known-risky-global", () => {
 });
 
 describe("global-audit outdated version thresholds", () => {
-  it("2+ majors behind fires severely-outdated-global (high)", () => {
+  it("2+ majors behind fires severely-outdated-global (high)", async () => {
     const { exec } = makeFakeExec({
       npmList: JSON.stringify({ dependencies: { "severely-behind": { version: "1.0.0" } } }),
       latestVersions: { "severely-behind": "3.2.0" },
       scripts: {},
     });
 
-    const result = runGlobalAudit({ exec });
+    const result = await runGlobalAudit({ exec });
 
     const finding = result.findings.find((f) => f.rule === "severely-outdated-global");
     expect(finding).toBeDefined();
@@ -70,14 +70,14 @@ describe("global-audit outdated version thresholds", () => {
     expect(result.findings.some((f) => f.rule === "outdated-global")).toBe(false);
   });
 
-  it("exactly 1 major behind fires outdated-global (medium)", () => {
+  it("exactly 1 major behind fires outdated-global (medium)", async () => {
     const { exec } = makeFakeExec({
       npmList: JSON.stringify({ dependencies: { "one-behind": { version: "1.0.0" } } }),
       latestVersions: { "one-behind": "2.0.0" },
       scripts: {},
     });
 
-    const result = runGlobalAudit({ exec });
+    const result = await runGlobalAudit({ exec });
 
     const finding = result.findings.find((f) => f.rule === "outdated-global");
     expect(finding).toBeDefined();
@@ -85,14 +85,14 @@ describe("global-audit outdated version thresholds", () => {
     expect(result.findings.some((f) => f.rule === "severely-outdated-global")).toBe(false);
   });
 
-  it("equal versions fire neither outdated rule", () => {
+  it("equal versions fire neither outdated rule", async () => {
     const { exec } = makeFakeExec({
       npmList: JSON.stringify({ dependencies: { "up-to-date": { version: "1.0.0" } } }),
       latestVersions: { "up-to-date": "1.0.0" },
       scripts: {},
     });
 
-    const result = runGlobalAudit({ exec });
+    const result = await runGlobalAudit({ exec });
 
     expect(result.findings.some((f) => f.rule === "outdated-global")).toBe(false);
     expect(result.findings.some((f) => f.rule === "severely-outdated-global")).toBe(false);
@@ -100,14 +100,14 @@ describe("global-audit outdated version thresholds", () => {
 });
 
 describe("global-audit install scripts", () => {
-  it("flags packages with postinstall scripts", () => {
+  it("flags packages with postinstall scripts", async () => {
     const { exec } = makeFakeExec({
       npmList: JSON.stringify({ dependencies: { "has-scripts": { version: "1.0.0" } } }),
       latestVersions: { "has-scripts": "1.0.0" },
       scripts: { "has-scripts@1.0.0": JSON.stringify({ postinstall: "node x.js" }) },
     });
 
-    const result = runGlobalAudit({ exec });
+    const result = await runGlobalAudit({ exec });
 
     const finding = result.findings.find((f) => f.rule === "global-with-install-scripts");
     expect(finding).toBeDefined();
@@ -116,14 +116,14 @@ describe("global-audit install scripts", () => {
 });
 
 describe("global-audit no globals", () => {
-  it("all three commands succeed but report zero deps -> skipped 'No global packages found'", () => {
+  it("all three commands succeed but report zero deps -> skipped 'No global packages found'", async () => {
     const { exec } = makeFakeExec({
       npmList: JSON.stringify({ dependencies: {} }),
       pnpmList: JSON.stringify([{ dependencies: {} }]),
       yarnList: JSON.stringify({ type: "info", data: { items: [] } }),
     });
 
-    const result = runGlobalAudit({ exec });
+    const result = await runGlobalAudit({ exec });
 
     expect(result.skipped).toBe("No global packages found");
     expect(result.findings).toEqual([]);
@@ -131,10 +131,10 @@ describe("global-audit no globals", () => {
 });
 
 describe("global-audit all commands failed", () => {
-  it("all list commands return null -> skipped says commands failed, NOT 'No global packages found'", () => {
+  it("all list commands return null -> skipped says commands failed, NOT 'No global packages found'", async () => {
     const { exec } = makeFakeExec({});
 
-    const result = runGlobalAudit({ exec });
+    const result = await runGlobalAudit({ exec });
 
     expect(result.skipped).toBeDefined();
     expect(result.skipped).not.toBe("No global packages found");
@@ -144,7 +144,7 @@ describe("global-audit all commands failed", () => {
 });
 
 describe("global-audit partial command failure", () => {
-  it("npm succeeds with a package while pnpm/yarn fail -> findings still processed, skipped names pnpm+yarn failure", () => {
+  it("npm succeeds with a package while pnpm/yarn fail -> findings still processed, skipped names pnpm+yarn failure", async () => {
     const { exec } = makeFakeExec({
       npmList: JSON.stringify({ dependencies: { "some-pkg": { version: "1.0.0" } } }),
       pnpmList: null,
@@ -153,7 +153,7 @@ describe("global-audit partial command failure", () => {
       scripts: { "some-pkg@1.0.0": JSON.stringify({ postinstall: "node x.js" }) },
     });
 
-    const result = runGlobalAudit({ exec });
+    const result = await runGlobalAudit({ exec });
 
     const finding = result.findings.find((f) => f.rule === "global-with-install-scripts");
     expect(finding).toBeDefined();
@@ -164,7 +164,7 @@ describe("global-audit partial command failure", () => {
 });
 
 describe("global-audit hostile package name (argv isolation canary)", () => {
-  it("passes a shell-metacharacter package name as a single argv element, never shell-interpreted", () => {
+  it("passes a shell-metacharacter package name as a single argv element, never shell-interpreted", async () => {
     const hostileName = '; touch /tmp/pwned; $(id) "x"';
     const { exec, calls } = makeFakeExec({
       npmList: JSON.stringify({ dependencies: { [hostileName]: { version: "1.0.0" } } }),
@@ -172,7 +172,7 @@ describe("global-audit hostile package name (argv isolation canary)", () => {
       scripts: {},
     });
 
-    const result = runGlobalAudit({ exec });
+    const result = await runGlobalAudit({ exec });
 
     // The finding should exist and carry the raw name — no crash, no shell interpretation.
     expect(result.findings).toBeDefined();
@@ -206,7 +206,7 @@ describe("global-audit hostile package name (argv isolation canary)", () => {
 });
 
 describe("global-audit dedupe", () => {
-  it("processes a package seen in both npm and pnpm lists only once", () => {
+  it("processes a package seen in both npm and pnpm lists only once", async () => {
     const { exec, calls } = makeFakeExec({
       npmList: JSON.stringify({ dependencies: { "dup-pkg": { version: "1.0.0" } } }),
       pnpmList: JSON.stringify([{ dependencies: { "dup-pkg": { version: "2.0.0" } } }]),
@@ -214,7 +214,7 @@ describe("global-audit dedupe", () => {
       scripts: {},
     });
 
-    runGlobalAudit({ exec });
+    await runGlobalAudit({ exec });
 
     const viewVersionCalls = calls.filter(
       (c) => c.cmd === "npm" && c.args[0] === "view" && c.args[2] === "version" && c.args[1] === "dup-pkg"
@@ -225,5 +225,31 @@ describe("global-audit dedupe", () => {
 
     expect(viewVersionCalls.length).toBe(1);
     expect(viewScriptsCalls.length).toBe(1);
+  });
+});
+
+describe("global-audit concurrency", () => {
+  it("runs npm view calls concurrently (bounded at 4) and keeps findings in package order", async () => {
+    const names = Array.from({ length: 10 }, (_, i) => `pkg-${i}`);
+    const deps = Object.fromEntries(names.map((n) => [n, { version: "1.0.0" }]));
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const exec = async (cmd: string, args: string[]): Promise<string | null> => {
+      if (cmd === "npm" && args[0] === "list") return JSON.stringify({ dependencies: deps });
+      if (cmd !== "npm" || args[0] !== "view") return null;
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      // earlier packages answer slower, so completion order is the reverse of package order
+      const index = Number((args[1] ?? "").replace(/\D+/g, "").slice(0, 1));
+      await new Promise((r) => setTimeout(r, (10 - index) * 3));
+      inFlight--;
+      return args[2] === "version" ? "2.0.0" : null;
+    };
+
+    const result = await runGlobalAudit({ exec });
+
+    expect(maxInFlight).toBeGreaterThan(1);
+    expect(maxInFlight).toBeLessThanOrEqual(4);
+    expect(result.findings.map((f) => f.message.split("@")[0])).toEqual(names);
   });
 });

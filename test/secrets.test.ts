@@ -34,6 +34,27 @@ describe("secrets check", () => {
     expect(permFinding?.severity).toBe("high");
   });
 
+  it("one npm token line yields exactly one plaintext finding, from the most specific rule", () => {
+    const token = "npm_" + "a".repeat(40);
+    writeFileSync(join(home, ".npmrc"), `//registry.npmjs.org/:_authToken=${token}\n`);
+    chmodSync(join(home, ".npmrc"), 0o600);
+
+    const result = runSecretsCheck({ home, cwd });
+
+    const plaintext = result.findings.filter((f) => f.rule.startsWith("plaintext-"));
+    expect(plaintext.map((f) => f.rule)).toEqual(["plaintext-npm-token"]);
+  });
+
+  it("two different secrets on separate lines still yield one finding each", () => {
+    writeFileSync(join(home, ".npmrc"), `//registry.npmjs.org/:_authToken=npm_${"a".repeat(40)}\n_password=hunter22\n`);
+    chmodSync(join(home, ".npmrc"), 0o600);
+
+    const result = runSecretsCheck({ home, cwd });
+
+    const plaintext = result.findings.filter((f) => f.rule.startsWith("plaintext-"));
+    expect(plaintext.map((f) => f.rule).sort()).toEqual(["plaintext-npm-password", "plaintext-npm-token"]);
+  });
+
   it("clean policy-only npmrc produces zero findings", () => {
     writeFileSync(join(home, ".npmrc"), "ignore-scripts=true\naudit=true\n");
     chmodSync(join(home, ".npmrc"), 0o600);

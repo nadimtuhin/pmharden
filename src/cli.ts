@@ -59,9 +59,9 @@ program
   .command("global")
   .description("Audit globally installed packages for CVEs, stale versions, install-script risks")
   .option("--json", "Output findings as JSON")
-  .action(({ json }) => {
+  .action(async ({ json }) => {
     const spin = json ? null : new Spinner("Fetching global package list…").start();
-    const result = runGlobalAudit(
+    const result = await runGlobalAudit(
       json
         ? {}
         : {
@@ -89,7 +89,7 @@ program
   .command("all")
   .description("Run all checks: config audit + secrets scan + global audit + publish check")
   .option("--json", "Output findings as JSON")
-  .action(({ json }) => {
+  .action(async ({ json }) => {
     const allFindings: Finding[] = [];
 
     if (!json) console.log("");
@@ -118,7 +118,7 @@ program
 
     // 3. Global audit
     const globalSpin = json ? null : new Spinner("Fetching global package list…").start();
-    const globalResult = runGlobalAudit(
+    const globalResult = await runGlobalAudit(
       json
         ? {}
         : {
@@ -163,4 +163,4 @@ if (process.argv.length === 2) {
   process.argv.push("all");
 }
 
-program.parse(process.argv);
+await program.parseAsync(process.argv);
