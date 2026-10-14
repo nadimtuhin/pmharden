@@ -17,9 +17,15 @@ const SECRET_PATTERNS: Array<{ name: string; regex: RegExp }> = [
 ];
 
 function scanFileForSecrets(path: string, content: string, findings: Finding[], tool: string): void {
+  // Patterns are ordered most specific first; a later match overlapping an earlier one is the same secret.
+  const claimed: Array<[number, number]> = [];
   for (const pattern of SECRET_PATTERNS) {
-      const matches = Array.from(content.matchAll(pattern.regex));
+    const matches = Array.from(content.matchAll(pattern.regex));
     for (const match of matches) {
+      const start = match.index ?? 0;
+      const end = start + match[0].length;
+      if (claimed.some(([s, e]) => start < e && s < end)) continue;
+      claimed.push([start, end]);
       // Redact the actual value in the message
       const redacted = match[0].replace(/=.+/, "=***REDACTED***");
       findings.push({
