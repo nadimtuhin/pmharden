@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Token scope check: legacy UUID tokens flagged as high, modern npm_ tokens flagged as info
 - New `publish-check` module: detects missing `files` allowlist, overly broad globs, `.npmignore` denylist risk
 
-## [0.1.5] - 2025-01-01
+## [0.1.5] - 2026-06-21
 
 ### Added
 - Initial public release
