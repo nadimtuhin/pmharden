@@ -8,18 +8,64 @@ import type { CheckContext, CheckResult, Finding } from "../utils/types.js";
 
 // ─── npm ───────────────────────────────────────────────────────────────────
 
+// Mirrors how npm's ini parser reads a value: surrounding quotes are stripped,
+// and in an unquoted value an unescaped ";" or "#" starts a comment.
+function unquoteIniValue(raw: string): string {
+  const val = raw.trim();
+  if (val.length >= 2 && (val[0] === '"' || val[0] === "'") && val[val.length - 1] === val[0]) {
+    return val.slice(1, -1);
+  }
+  let out = "";
+  let esc = false;
+  for (const c of val) {
+    if (esc) {
+      out += "\\;#".includes(c) ? c : "\\" + c;
+      esc = false;
+    } else if (c === ";" || c === "#") {
+      break;
+    } else if (c === "\\") {
+      esc = true;
+    } else {
+      out += c;
+    }
+  }
+  if (esc) out += "\\";
+  return out.trim();
+}
+
 function parseNpmrc(content: string): Record<string, string> {
   const cfg: Record<string, string> = {};
-  for (const line of content.split("\n")) {
+  for (const line of content.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith(";") || trimmed.startsWith("#")) continue;
     const eq = trimmed.indexOf("=");
     if (eq === -1) continue;
     const key = trimmed.slice(0, eq).trim().toLowerCase();
-    const val = trimmed.slice(eq + 1).trim();
+    const val = unquoteIniValue(trimmed.slice(eq + 1));
     cfg[key] = val;
   }
   return cfg;
+}
+
+// Top-level "key: value" from a YAML file, ignoring commented-out lines and
+// trailing "# comments". Returns every value the key is given.
+function readYamlKey(content: string, key: string): string[] {
+  const values: string[] = [];
+  const re = new RegExp(`^${key}\\s*:(.*)$`);
+  for (const line of content.split(/\r?\n/)) {
+    const m = line.match(re);
+    if (!m) continue;
+    let val = m[1].replace(/(^|\s)#.*$/, "").trim();
+    if (val.length >= 2 && (val[0] === '"' || val[0] === "'") && val[val.length - 1] === val[0]) {
+      val = val.slice(1, -1);
+    }
+    values.push(val);
+  }
+  return values;
+}
+
+function isWindows(): boolean {
+  return process.platform === "win32";
 }
 
 function auditNpmrc(path: string, findings: Finding[], skips: string[]): void {
@@ -96,7 +142,8 @@ function auditNpmrc(path: string, findings: Finding[], skips: string[]): void {
   }
 
   // 7. File permissions too open
-  const mode = fileMode(path);
+  // Windows has no POSIX mode bits: stat() always reports 0o666 (or 0o444).
+  const mode = isWindows() ? null : fileMode(path);
   if (mode !== null && (mode & 0o044) !== 0) {
     findings.push({
       severity: "medium",
@@ -163,17 +210,29 @@ function auditPnpm(findings: Finding[], home: string, cwd: string, skips: string
   }
 
   const sources = [workspaceYaml, globalYaml, projectNpmrc].filter((p) => fileExists(p));
-  const combined = sources
-    .map((p) => {
-      const content = readFile(p);
-      if (content === null) skips.push(`could not read ${p}`);
-      return content ?? "";
-    })
-    .join("\n");
+  const values = { strictDepBuilds: [] as string[], minimumReleaseAge: [] as string[], blockExoticSubdeps: [] as string[] };
+  for (const p of sources) {
+    const content = readFile(p);
+    if (content === null) {
+      skips.push(`could not read ${p}`);
+      continue;
+    }
+    if (p === projectNpmrc) {
+      // pnpm 10.x reads kebab-case settings from the project .npmrc
+      const cfg = parseNpmrc(content);
+      if (cfg["strict-dep-builds"] !== undefined) values.strictDepBuilds.push(cfg["strict-dep-builds"]);
+      if (cfg["minimum-release-age"] !== undefined) values.minimumReleaseAge.push(cfg["minimum-release-age"]);
+      if (cfg["block-exotic-subdeps"] !== undefined) values.blockExoticSubdeps.push(cfg["block-exotic-subdeps"]);
+    } else {
+      values.strictDepBuilds.push(...readYamlKey(content, "strictDepBuilds"));
+      values.minimumReleaseAge.push(...readYamlKey(content, "minimumReleaseAge"));
+      values.blockExoticSubdeps.push(...readYamlKey(content, "blockExoticSubdeps"));
+    }
+  }
   const primarySource = hasWorkspace ? workspaceYaml : sources[0];
   const fileField = primarySource ? { file: primarySource } : {};
 
-  if (!combined.includes("strictDepBuilds") && !combined.includes("strict-dep-builds")) {
+  if (!values.strictDepBuilds.some((v) => v === "true")) {
     findings.push({
       severity: "high",
       tool: "pnpm",
@@ -185,7 +244,7 @@ function auditPnpm(findings: Finding[], home: string, cwd: string, skips: string
     });
   }
 
-  if (!combined.includes("minimumReleaseAge") && !combined.includes("minimum-release-age")) {
+  if (!values.minimumReleaseAge.some((v) => Number(v) > 0)) {
     findings.push({
       severity: "medium",
       tool: "pnpm",
@@ -197,7 +256,7 @@ function auditPnpm(findings: Finding[], home: string, cwd: string, skips: string
     });
   }
 
-  if (combined.includes("blockExoticSubdeps: false")) {
+  if (values.blockExoticSubdeps.some((v) => v === "false")) {
     findings.push({
       severity: "medium",
       tool: "pnpm",
@@ -222,7 +281,7 @@ function auditYarnrc(findings: Finding[], home: string, skips: string[]): void {
       skips.push(`could not read ${v2path}`);
       return;
     }
-    if (!content.includes("enableScripts: false")) {
+    if (!readYamlKey(content, "enableScripts").some((v) => v === "false")) {
       findings.push({
         severity: "low",
         tool: "yarn",
@@ -233,7 +292,7 @@ function auditYarnrc(findings: Finding[], home: string, skips: string[]): void {
         agentPrompt: `Open ${v2path} and add the line "enableScripts: false" at the top level if it is not already present. This is a YAML file — preserve indentation of existing lines. Do not change any other lines.`,
       });
     }
-    if (!content.includes("npmMinimalAgeGate")) {
+    if (!readYamlKey(content, "npmMinimalAgeGate").some((v) => v !== "")) {
       findings.push({
         severity: "low",
         tool: "yarn",
@@ -278,7 +337,7 @@ function auditBunfig(findings: Finding[], home: string, skips: string[]): void {
     skips.push(`could not read ${path}`);
     return;
   }
-  if (!content.includes("registry")) {
+  if (!content.split(/\r?\n/).some((line) => /^\s*registry\s*=/.test(line))) {
     findings.push({
       severity: "low",
       tool: "bun",
@@ -300,7 +359,8 @@ export function runConfigAudit(ctx: CheckContext = {}): CheckResult {
   const skips: string[] = [];
 
   // npm: check both global and local .npmrc
-  const npmrcPaths = [join(home, ".npmrc"), join(cwd, ".npmrc")];
+  // When run from $HOME both entries are the same file — audit it once.
+  const npmrcPaths = [...new Set([join(home, ".npmrc"), join(cwd, ".npmrc")])];
   let foundNpmrc = false;
   for (const p of npmrcPaths) {
     if (fileExists(p)) {
