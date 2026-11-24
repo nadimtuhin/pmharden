@@ -20,6 +20,8 @@ function scanFileForSecrets(path: string, content: string, findings: Finding[], 
   // Patterns are ordered most specific first; a later match overlapping an earlier one is the same secret.
   const claimed: Array<[number, number]> = [];
   for (const pattern of SECRET_PATTERNS) {
+    // matchAll starts from the regex's lastIndex; never inherit state from an earlier .test().
+    pattern.regex.lastIndex = 0;
     const matches = Array.from(content.matchAll(pattern.regex));
     for (const match of matches) {
       const start = match.index ?? 0;
@@ -42,6 +44,8 @@ function scanFileForSecrets(path: string, content: string, findings: Finding[], 
 }
 
 function checkFilePermissions(path: string, findings: Finding[], tool: string): void {
+  // Windows has no POSIX mode bits: stat() always reports 0o666 (or 0o444).
+  if (process.platform === "win32") return;
   const mode = fileMode(path);
   if (mode === null) return;
   if ((mode & 0o077) !== 0) {
@@ -62,7 +66,9 @@ function checkGitTracked(path: string, content: string, findings: Finding[], too
   // A committed .npmrc with only policy settings (ignore-scripts etc.) is intentional.
   const hasSecret = SECRET_PATTERNS.some((p) => {
     p.regex.lastIndex = 0;
-    return p.regex.test(content);
+    const found = p.regex.test(content);
+    p.regex.lastIndex = 0;
+    return found;
   });
   if (!hasSecret) return;
   try {
@@ -151,7 +157,11 @@ export function runSecretsCheck(ctx: CheckContext = {}): CheckResult {
     { path: join(cwd, ".yarnrc.yml"), tool: "yarn" },
   ];
 
+  const seen = new Set<string>();
   for (const { path, tool } of CONFIG_FILES) {
+    // When run from $HOME the home and project entries are the same file.
+    if (seen.has(path)) continue;
+    seen.add(path);
     if (!fileExists(path)) continue;
     const content = readFile(path);
     if (content === null) {
@@ -162,8 +172,9 @@ export function runSecretsCheck(ctx: CheckContext = {}): CheckResult {
     checkFilePermissions(path, findings, tool);
     checkEnvVarUsage(path, content, findings, tool);
     checkTokenScope(path, content, findings, tool);
-    // Only check git tracking for project-level files (not home dir ones)
-    if (!path.startsWith(home)) {
+    // Only check git tracking for project-level files (not home dir ones).
+    // Compare the directory, not a prefix: projects usually live under $HOME.
+    if (dirname(path) !== home) {
       checkGitTracked(path, content, findings, tool, cwd);
     }
   }
