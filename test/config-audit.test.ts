@@ -277,3 +277,145 @@ describe("config-audit yarn rules", () => {
     expect(rules.has("no-npm-minimal-age-gate")).toBe(false);
   });
 });
+
+describe("config-audit npmrc parsing matches npm's ini parser", () => {
+  let home: string;
+  let cwd: string;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "pmharden-home-"));
+    cwd = mkdtempSync(join(tmpdir(), "pmharden-cwd-"));
+  });
+
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it("quoted values and trailing ; / # comments are read the way npm reads them", () => {
+    writeFileSync(
+      join(home, ".npmrc"),
+      'ignore-scripts="true"\naudit = false ; temporarily off\nallow-git=all # legacy monorepo\n'
+    );
+    const result = runConfigAudit({ home, cwd });
+    const rules = new Set(result.findings.map((f) => f.rule));
+
+    expect(rules.has("ignore-scripts-disabled")).toBe(false);
+    expect(rules.has("audit-disabled")).toBe(true);
+    expect(rules.has("allow-git-all")).toBe(true);
+  });
+});
+
+describe("config-audit pnpm settings that are commented out or disabled", () => {
+  let home: string;
+  let cwd: string;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "pmharden-home-"));
+    cwd = mkdtempSync(join(tmpdir(), "pmharden-cwd-"));
+  });
+
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it("commented-out keys and strictDepBuilds: false do not count as set", () => {
+    writeFileSync(
+      join(cwd, "pnpm-workspace.yaml"),
+      "packages:\n  - 'pkgs/*'\nstrictDepBuilds: false\n# minimumReleaseAge: 10080\n"
+    );
+    const result = runConfigAudit({ home, cwd });
+    const rules = new Set(result.findings.map((f) => f.rule));
+
+    expect(rules.has("no-strict-dep-builds")).toBe(true);
+    expect(rules.has("no-minimum-release-age")).toBe(true);
+  });
+
+  it("strict-dep-builds=false in .npmrc does not count as set; blockExoticSubdeps:false without a space is caught", () => {
+    writeFileSync(join(cwd, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+    writeFileSync(join(cwd, ".npmrc"), "strict-dep-builds=false\nminimum-release-age=10080\n");
+    writeFileSync(join(home, ".npmrc"), "ignore-scripts=true\n");
+    mkdirSync(join(home, ".config", "pnpm"), { recursive: true });
+    writeFileSync(join(home, ".config", "pnpm", "config.yaml"), "blockExoticSubdeps:   false   # testing\n");
+    const result = runConfigAudit({ home, cwd });
+    const rules = new Set(result.findings.map((f) => f.rule));
+
+    expect(rules.has("no-strict-dep-builds")).toBe(true);
+    expect(rules.has("no-minimum-release-age")).toBe(false);
+    expect(rules.has("block-exotic-subdeps-disabled")).toBe(true);
+  });
+
+  it("strictDepBuilds: true and minimumReleaseAge set still pass", () => {
+    writeFileSync(join(cwd, "pnpm-workspace.yaml"), "strictDepBuilds: true # enforced\nminimumReleaseAge: 10080\n");
+    const result = runConfigAudit({ home, cwd });
+    const rules = new Set(result.findings.map((f) => f.rule));
+
+    expect(rules.has("no-strict-dep-builds")).toBe(false);
+    expect(rules.has("no-minimum-release-age")).toBe(false);
+  });
+});
+
+describe("config-audit yarn/bun commented-out settings", () => {
+  let home: string;
+  let cwd: string;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "pmharden-home-"));
+    cwd = mkdtempSync(join(tmpdir(), "pmharden-cwd-"));
+  });
+
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it("commented-out enableScripts / npmMinimalAgeGate in .yarnrc.yml still fire", () => {
+    writeFileSync(join(home, ".yarnrc.yml"), "# enableScripts: false\n# npmMinimalAgeGate: 10080\n");
+    const result = runConfigAudit({ home, cwd });
+    const rules = new Set(result.findings.map((f) => f.rule));
+
+    expect(rules.has("enable-scripts-missing")).toBe(true);
+    expect(rules.has("no-npm-minimal-age-gate")).toBe(true);
+  });
+
+  it("enableScripts:false with extra spacing or a trailing comment is accepted", () => {
+    writeFileSync(join(home, ".yarnrc.yml"), "enableScripts:   false  # hardened\nnpmMinimalAgeGate: 10080\n");
+    const result = runConfigAudit({ home, cwd });
+    expect(result.findings.some((f) => f.rule === "enable-scripts-missing")).toBe(false);
+  });
+
+  it("a commented-out registry line in ~/.bunfig.toml still fires no-registry-pinned", () => {
+    writeFileSync(join(home, ".bunfig.toml"), '[install]\n# registry = "https://registry.npmjs.org/"\n');
+    const result = runConfigAudit({ home, cwd });
+    expect(result.findings.some((f) => f.rule === "no-registry-pinned")).toBe(true);
+  });
+});
+
+describe("config-audit on Windows / from $HOME", () => {
+  const realPlatform = process.platform;
+  let home: string;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "pmharden-home-"));
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, "platform", { value: realPlatform });
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it("does not fire npmrc-permissions on Windows, where stat() mode bits are meaningless", () => {
+    writeFileSync(join(home, ".npmrc"), "ignore-scripts=true\nallow-git=none\n");
+    chmodSync(join(home, ".npmrc"), 0o666);
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const result = runConfigAudit({ home, cwd: home });
+    expect(result.findings.some((f) => f.rule === "npmrc-permissions")).toBe(false);
+  });
+
+  it("running from $HOME audits ~/.npmrc once, not twice", () => {
+    writeFileSync(join(home, ".npmrc"), "allow-git=none\n");
+    const result = runConfigAudit({ home, cwd: home });
+    expect(result.findings.filter((f) => f.rule === "ignore-scripts-disabled")).toHaveLength(1);
+  });
+});

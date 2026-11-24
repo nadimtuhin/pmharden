@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, writeFileSync, chmodSync, rmSync } from "fs";
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync } from "fs";
+import { execFileSync } from "child_process";
 import { tmpdir } from "os";
 import { join } from "path";
 import { runSecretsCheck } from "../src/checks/secrets.js";
@@ -129,4 +130,71 @@ describe("secrets check", () => {
       }
     }
   );
+});
+
+describe("secrets check: project under $HOME", () => {
+  let home: string;
+  let cwd: string;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "pmharden-secrets-home-"));
+    cwd = join(home, "code", "project");
+    mkdirSync(cwd, { recursive: true });
+    execFileSync("git", ["init", "-q"], { cwd });
+  });
+
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it("a committed project .npmrc with a token fires config-committed-to-git even though the project lives under $HOME", () => {
+    writeFileSync(join(cwd, ".npmrc"), `//registry.npmjs.org/:_authToken=npm_${"b".repeat(40)}\n`);
+    execFileSync("git", ["add", ".npmrc"], { cwd });
+
+    const result = runSecretsCheck({ home, cwd });
+    expect(result.findings.some((f) => f.rule === "config-committed-to-git")).toBe(true);
+  });
+
+  it("a second scan in the same process still finds the token (shared /g regex state is not leaked)", () => {
+    writeFileSync(join(cwd, ".npmrc"), `//registry.npmjs.org/:_authToken=npm_${"d".repeat(40)}\n`);
+    execFileSync("git", ["add", ".npmrc"], { cwd });
+
+    runSecretsCheck({ home, cwd });
+    const second = runSecretsCheck({ home, cwd });
+    expect(second.findings.some((f) => f.rule === "plaintext-npm-token")).toBe(true);
+  });
+
+  it("running from $HOME itself does not report the same file twice", () => {
+    writeFileSync(join(home, ".npmrc"), `//registry.npmjs.org/:_authToken=npm_${"c".repeat(40)}\n`);
+    chmodSync(join(home, ".npmrc"), 0o600);
+
+    const result = runSecretsCheck({ home, cwd: home });
+    expect(result.findings.filter((f) => f.rule === "plaintext-npm-token")).toHaveLength(1);
+  });
+});
+
+describe("secrets check on Windows", () => {
+  const realPlatform = process.platform;
+  let home: string;
+  let cwd: string;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "pmharden-secrets-home-"));
+    cwd = mkdtempSync(join(tmpdir(), "pmharden-secrets-cwd-"));
+    Object.defineProperty(process, "platform", { value: "win32" });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, "platform", { value: realPlatform });
+    rmSync(home, { recursive: true, force: true });
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it("does not report POSIX mode bits as config-file-permissions (Windows always reports 0o666)", () => {
+    writeFileSync(join(home, ".npmrc"), "ignore-scripts=true\n");
+    chmodSync(join(home, ".npmrc"), 0o666);
+
+    const result = runSecretsCheck({ home, cwd });
+    expect(result.findings.some((f) => f.rule === "config-file-permissions")).toBe(false);
+  });
 });
